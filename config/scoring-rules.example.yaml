@@ -1,0 +1,17 @@
+# Scaffold-only example for future pluggable scoring rules.
+# The current MVP uses the built-in heuristics in scripts/common.py.
+
+weights:
+  relevance: 0.40
+  recency: 0.20
+  popularity: 0.25
+  value: 0.15
+
+heuristics:
+  title_keyword_hit: 0.5
+  abstract_keyword_hit: 0.3
+  category_match: 1.0
+  exclude_keyword_penalty: -1.0
+  published_within_2_days: 3.0
+  published_within_7_days: 2.0
+  published_within_30_days: 1.0

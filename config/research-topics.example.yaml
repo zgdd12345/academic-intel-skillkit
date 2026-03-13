@@ -1,0 +1,57 @@
+# Copy this file to config/research-topics.local.yaml for the canonical first-run path.
+# Canonical local config for the current arXiv-only daily brief MVP.
+# Consumed today by:
+# - scripts/fetch_arxiv.py
+# - scripts/generate_daily_brief.py
+# Additional collectors and periodic reports are scaffold-only and intentionally
+# omitted from this starter file.
+
+obsidian:
+  vault_path: "/path/to/your/ObsidianVault"
+  root_dir: "Research_Intel"
+
+reporting:
+  # The canonical template renders Chinese narrative, recommendations, and section
+  # labels while keeping paper metadata fields in their original language.
+  daily_top_n: 8
+  daily_detailed_top_n: 3
+
+sources:
+  arxiv:
+    enabled: true
+    lookback_days: 2
+    max_results_per_topic: 25
+    topic_ids: []
+
+topics:
+  - id: agents
+    name: AI Agents
+    enabled: true
+    priority: high
+    include_keywords:
+      - agent
+      - multi-agent
+      - tool use
+      - planning
+      - reasoning
+    exclude_keywords:
+      - game agent
+      - financial agent
+    arxiv_categories:
+      - cs.AI
+      - cs.LG
+      - cs.CL
+
+  - id: multimodal
+    name: Multimodal Systems
+    enabled: true
+    priority: medium
+    include_keywords:
+      - multimodal
+      - vision-language
+      - image-text
+      - video understanding
+    exclude_keywords: []
+    arxiv_categories:
+      - cs.CV
+      - cs.CL

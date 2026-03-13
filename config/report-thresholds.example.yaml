@@ -1,0 +1,12 @@
+# Scaffold-only example for future weekly/monthly review generation.
+# No current MVP script reads this file.
+
+weekly:
+  min_daily_briefs: 3
+  min_deep_dives: 1
+  min_high_signal_items: 5
+
+monthly:
+  min_daily_briefs: 10
+  min_deep_dives: 3
+  min_high_signal_items: 15
