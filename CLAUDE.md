@@ -6,11 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Open-source research-intelligence skill library for academic paper tracking and reporting. Designed to run across multiple AI agent platforms (OpenClaw, Claude Code, Codex, OpenCode). Core capability: deterministic arXiv daily brief generation with Obsidian vault integration.
 
+## Runtime Environment
+
+This project runs in the **`crawer`** conda environment:
+
+```bash
+conda activate crawer
+```
+
+All commands, script executions, and test runs must use this environment.
+
 ## Setup
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+conda activate crawer
 pip install -r requirements.txt
 mkdir -p output
 cp config/research-topics.example.yaml config/research-topics.local.yaml
@@ -36,8 +45,8 @@ python3 scripts/generate_daily_brief.py \
   --huggingface output/huggingface.json \
   --out output/daily-brief.md
 
-# Run tests
-python3 -m pytest tests/test_mvp_cli.py
+# Run tests (use crawer env)
+conda run -n crawer python -m pytest tests/test_mvp_cli.py
 ```
 
 ## Architecture

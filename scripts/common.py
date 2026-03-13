@@ -293,10 +293,11 @@ def obsidian_root(config: dict[str, Any]) -> Path | None:
     if not isinstance(obsidian, dict):
         return None
     vault_path = coerce_optional_str(obsidian.get("vault_path"))
-    root_dir = coerce_optional_str(obsidian.get("root_dir"))
-    if not vault_path or not root_dir:
+    if not vault_path:
         return None
-    return Path(vault_path).expanduser() / root_dir
+    root_dir = coerce_optional_str(obsidian.get("root_dir")) or ""
+    base = Path(vault_path).expanduser()
+    return base / root_dir if root_dir else base
 
 
 def obsidian_daily_brief_path(config: dict[str, Any], target_date: str) -> Path | None:
