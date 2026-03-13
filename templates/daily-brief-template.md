@@ -1,28 +1,53 @@
 <!-- Canonical template for the current arXiv-only daily brief MVP.
-Used by scripts/generate_daily_brief.py by default. -->
-# 研究情报日报 | {{date}}
+Used by scripts/generate_daily_brief.py by default.
+Optimized for Obsidian rendering with YAML frontmatter and callout blocks. -->
+---
+date: {{date}}
+tags:
+  - research-intel
+  - daily-brief
+candidates: {{candidate_count}}
+high_signal: {{high_signal_count}}
+hotspots: {{hotspot_count}}
+recommended: {{recommended_count}}
+---
 
-## 今日概览
-- {{overview}}
-- 已收集候选：{{candidate_count}}
-- 高信号条目：{{high_signal_count}}
-- 社区热点：{{hotspot_count}}
-- 建议深读：{{recommended_count}}
+# 研究情报日报 · {{date}}
 
-## 今日优先阅读
+> [!abstract] 今日概览
+> {{overview}}
+
+---
+
+## 优先阅读
+
 {{top_detailed}}
 
-## 继续快扫
+---
+
+## 快速扫描
+
 {{top_brief}}
 
-## 主题观察
+---
+
+## 主题分布
+
 {{topic_snapshot}}
 
+---
+
 ## 社区热点
+
 {{hotspots}}
 
+---
+
 ## 建议动作
+
 {{suggested_actions}}
 
-## 数据边界
+---
+
+> [!note]- 数据说明
 {{source_notes}}

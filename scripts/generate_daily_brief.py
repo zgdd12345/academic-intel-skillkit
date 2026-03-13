@@ -177,25 +177,37 @@ def build_metadata_line(item: Any, topic_names: dict[str, str]) -> str:
 
 def format_detailed(items: list[Any], topic_names: dict[str, str]) -> str:
     if not items:
-        return "- 今天没有匹配到候选论文。"
-    lines: list[str] = []
+        return "_今天没有匹配到候选论文。_"
+    blocks: list[str] = []
     for item in items:
-        lines.append(f"- {format_link(item.title, item.url)}")
-        lines.append(f"  - {build_metadata_line(item, topic_names)}")
-        lines.append(f"  - {build_report_summary(item, topic_names, detailed=True)}")
-    return "\n".join(lines)
+        title_link = format_link(item.title, item.url)
+        metadata = build_metadata_line(item, topic_names)
+        summary = build_report_summary(item, topic_names, detailed=True)
+        blocks.append("\n".join([
+            f"> [!tip] {title_link}",
+            f"> {metadata}",
+            ">",
+            f"> {summary}",
+        ]))
+    return "\n\n".join(blocks)
+
+
+def escape_pipe(text: str) -> str:
+    return text.replace("|", "\\|")
 
 
 def format_brief(items: list[Any], topic_names: dict[str, str]) -> str:
     if not items:
-        return "- 今天没有额外需要补看的论文。"
-    lines: list[str] = []
+        return "_今天没有额外需要补看的论文。_"
+    rows = [
+        "| 论文标题 | 主题 | 发布日期 | 评分 |",
+        "| -------- | ---- | :------: | :--: |",
+    ]
     for item in items:
-        topic_label = format_topics(topic_ids_for_item(item), topic_names)
-        lines.append(
-            f"- {format_link(item.title, item.url)} | {topic_label} | {format_date(item.published_at)} | 评分 {item.score:.1f}"
-        )
-    return "\n".join(lines)
+        topic_label = escape_pipe(format_topics(topic_ids_for_item(item), topic_names))
+        link = format_link(escape_pipe(item.title or "未命名论文"), item.url)
+        rows.append(f"| {link} | {topic_label} | {format_date(item.published_at)} | {item.score:.1f} |")
+    return "\n".join(rows)
 
 
 def load_hotspots(path: str) -> list[dict[str, Any]]:
@@ -247,15 +259,14 @@ def build_hotspot_note(item: dict[str, Any], topic_names: dict[str, str]) -> tup
 
 def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) -> str:
     if not items:
-        return "- 暂无社区热点数据；这不会影响当前 arXiv 主链路日报生成。"
+        return "_暂无社区热点数据；这不会影响当前 arXiv 主链路日报生成。_"
     lines: list[str] = []
     for item in items[:5]:
         title = str(item.get("title") or item.get("name") or "未命名热点").strip()
         url = str(item.get("url") or item.get("link") or "").strip()
         label, note = build_hotspot_note(item, topic_names)
-        line = f"- {format_link(title, url)}"
-        line = f"{line} | {label}：{note}"
-        lines.append(line)
+        lines.append(f"- **{format_link(title, url)}**")
+        lines.append(f"  {label}：{note}")
     return "\n".join(lines)
 
 
@@ -302,7 +313,7 @@ def build_overview(
 
 def format_topic_snapshot(items: list[Any], topic_names: dict[str, str]) -> str:
     if not items:
-        return "- 今天没有形成可汇总的主题观察。"
+        return "_今天没有形成可汇总的主题观察。_"
 
     grouped: dict[str, list[Any]] = {}
     for item in items:
@@ -310,7 +321,7 @@ def format_topic_snapshot(items: list[Any], topic_names: dict[str, str]) -> str:
         primary_topic_id = topic_ids[0] if topic_ids else ""
         grouped.setdefault(primary_topic_id, []).append(item)
 
-    lines: list[str] = []
+    blocks: list[str] = []
     ordered_groups = sorted(
         grouped.items(),
         key=lambda entry: (
@@ -331,41 +342,39 @@ def format_topic_snapshot(items: list[Any], topic_names: dict[str, str]) -> str:
         for label in cross_topics:
             if label and label not in seen_cross_topics:
                 seen_cross_topics.append(label)
-        line = (
-            f"- {topic_label}：{len(group)} 篇入选，当前最高优先项为 {format_link(top_item.title, top_item.url)}"
-            f"（评分 {top_item.score:.1f}）。"
-        )
+        block_lines = [f"> [!abstract]- {topic_label}  ·  {len(group)} 篇入选"]
+        block_lines.append(f"> **最高优先项**：{format_link(top_item.title, top_item.url)}（评分 {top_item.score:.1f}）")
         if seen_cross_topics:
-            line = f"{line} 其中部分论文还与 {', '.join(seen_cross_topics[:2])} 存在交叉。"
-        lines.append(line)
-    return "\n".join(lines)
+            block_lines.append(f"> **跨主题关联**：{', '.join(seen_cross_topics[:2])}")
+        blocks.append("\n".join(block_lines))
+    return "\n\n".join(blocks)
 
 
 def format_source_notes(semantic_scholar_path: str, hotspot_path: str) -> str:
     lines = [
-        "- 当前稳定实现链路是 arXiv 抓取、归一化去重、主题匹配评分和 Markdown 日报渲染。",
-        "- 论文标题、作者、机构、ID、URL 和 Venue 名称保持原文；报告结构、说明和建议使用中文。",
-        "- 若条目包含 `summary_zh` 字段，报告会直接展示对应中文摘要；否则展示的是基于元数据和打分信号生成的中文导读，不等同于原摘要翻译。",
+        "当前稳定实现链路是 arXiv 抓取、归一化去重、主题匹配评分和 Markdown 日报渲染。",
+        "论文标题、作者、机构、ID、URL 和 Venue 名称保持原文；报告结构、说明和建议使用中文。",
+        "若条目包含 `summary_zh` 字段，报告会直接展示对应中文摘要；否则展示的是基于元数据和打分信号生成的中文导读，不等同于原摘要翻译。",
     ]
 
     semantic_scholar_available = bool(semantic_scholar_path and Path(semantic_scholar_path).exists())
     hotspot_available = bool(hotspot_path and Path(hotspot_path).exists())
 
     if semantic_scholar_available:
-        lines.append("- 已合并外部提供的 Semantic Scholar 归一化 JSON；本仓库本轮仍然没有内置采集。")
+        lines.append("已合并外部提供的 Semantic Scholar 归一化 JSON；本仓库本轮仍然没有内置采集。")
     elif semantic_scholar_path:
-        lines.append("- 指定了 Semantic Scholar JSON，但当前文件不存在，因此本次没有合并该输入。")
+        lines.append("指定了 Semantic Scholar JSON，但当前文件不存在，因此本次没有合并该输入。")
     else:
-        lines.append("- 本次未提供 Semantic Scholar 归一化 JSON；这不会影响当前 MVP 主链路。")
+        lines.append("本次未提供 Semantic Scholar 归一化 JSON；这不会影响当前 MVP 主链路。")
 
     if hotspot_available:
-        lines.append("- 已合并社区热点 JSON；当前仓库已提供最小可用的 `scripts/fetch_huggingface.py` 采集器。")
+        lines.append("已合并社区热点 JSON；当前仓库已提供最小可用的 `scripts/fetch_huggingface.py` 采集器。")
     elif hotspot_path:
-        lines.append("- 指定了社区热点 JSON，但当前文件不存在，因此该板块只保留空状态说明。")
+        lines.append("指定了社区热点 JSON，但当前文件不存在，因此该板块只保留空状态说明。")
     else:
-        lines.append("- 本次未提供社区热点 JSON，因此社区热点板块只显示空状态说明。")
+        lines.append("本次未提供社区热点 JSON，因此社区热点板块只显示空状态说明。")
 
-    return "\n".join(lines)
+    return "\n".join(f"> {line}" for line in lines)
 
 
 def format_suggested_actions(items: list[Any], topic_names: dict[str, str]) -> str:
