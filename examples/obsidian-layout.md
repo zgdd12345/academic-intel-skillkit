@@ -17,7 +17,7 @@ Research_Intel/
 
 Recommended notes:
 
-- MVP path: `01_Daily/YYYY-MM-DD-研究情报日报.md`
+- MVP path: `01_Daily/YYYY_MM_DD_Daily.md`
 - Optional future path: `02_Deep_Dives/YYYY/paper-<id>-summary.md`
 - Optional future path: `02_Deep_Dives/YYYY/paper-<id>-repro.md`
 - Optional future path: `03_Weekly/YYYY-Www-academic-weekly.md`

@@ -142,7 +142,7 @@ python3 scripts/run_daily_pipeline.py
 当 `config/research-topics.local.yaml` 里设置了有效的 `obsidian.vault_path` 和 `obsidian.root_dir` 时，它会默认把日报写到：
 
 ```text
-<vault_path>/<root_dir>/01_Daily/YYYY-MM-DD-研究情报日报.md
+<vault_path>/<root_dir>/01_Daily/YYYY_MM_DD_Daily.md
 ```
 
 #### 5. 之后可选地补社区热点并合并额外来源文件
@@ -352,7 +352,7 @@ python3 scripts/run_daily_pipeline.py
 When `config/research-topics.local.yaml` contains valid `obsidian.vault_path` and `obsidian.root_dir` values, the wrapper writes the final brief to:
 
 ```text
-<vault_path>/<root_dir>/01_Daily/YYYY-MM-DD-研究情报日报.md
+<vault_path>/<root_dir>/01_Daily/YYYY_MM_DD_Daily.md
 ```
 
 #### 5. Optionally collect hotspots and merge extra source files later
