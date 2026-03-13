@@ -303,7 +303,8 @@ def obsidian_daily_brief_path(config: dict[str, Any], target_date: str) -> Path 
     root = obsidian_root(config)
     if root is None:
         return None
-    return root / "01_Daily" / f"{target_date}-研究情报日报.md"
+    note_date = str(target_date).strip().replace("-", "_")
+    return root / "01_Daily" / f"{note_date}_Daily.md"
 
 
 class JsonLoadError(RuntimeError):

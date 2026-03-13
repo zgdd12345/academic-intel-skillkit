@@ -399,7 +399,7 @@ class ReviewRegressionTests(unittest.TestCase):
 
         self.assertEqual(
             path,
-            Path("/tmp/ObsidianVault/Research_Intel/01_Daily/2026-03-13-研究情报日报.md"),
+            Path("/tmp/ObsidianVault/Research_Intel/01_Daily/2026_03_13_Daily.md"),
         )
 
     def test_run_daily_pipeline_sequences_commands_and_uses_obsidian_output(self) -> None:
@@ -463,7 +463,7 @@ class ReviewRegressionTests(unittest.TestCase):
             self.assertIn("fetch_huggingface.py", hotspot_cmd[1])
             self.assertIn("generate_daily_brief.py", brief_cmd[1])
             self.assertIn(
-                "/tmp/ObsidianVault/Research_Intel/01_Daily/2026-03-13-研究情报日报.md",
+                "/tmp/ObsidianVault/Research_Intel/01_Daily/2026_03_13_Daily.md",
                 brief_cmd,
             )
 
