@@ -131,8 +131,15 @@ def _enrich_items(
     """Mutate items in-place, adding summary_zh. Returns count of enriched items."""
     enriched = 0
     for item in items:
-        paper_id = item.get("paper_id") or item.get("paperId") or item.get("id") or ""
-        summary = (item.get("summary") or item.get("abstract") or "").strip()
+        paper_id = (
+            item.get("paper_id") or item.get("paperId") or item.get("id")
+            or item.get("external_id")
+            or next(iter(item.get("paper_ids") or []), None)
+            or ""
+        )
+        summary = (
+            item.get("summary") or item.get("abstract") or item.get("content") or ""
+        ).strip()
         summary_zh = (item.get("summary_zh") or item.get("summaryZh") or "").strip()
 
         if paper_id not in shortlisted_ids:
@@ -254,7 +261,12 @@ def main() -> None:
     if args.huggingface and Path(args.huggingface).exists():
         hf_payload, hf_items = _load_raw_items(args.huggingface)
         all_hf_ids = {
-            (item.get("paper_id") or item.get("paperId") or item.get("id") or "").strip()
+            (
+                item.get("paper_id") or item.get("paperId") or item.get("id")
+                or item.get("external_id")
+                or next(iter(item.get("paper_ids") or []), None)
+                or ""
+            ).strip()
             for item in hf_items
         } - {""}
         if all_hf_ids:

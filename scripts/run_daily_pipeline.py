@@ -18,6 +18,9 @@ from common import (
     obsidian_daily_brief_path,
 )
 
+_REPO = Path(__file__).resolve().parents[1]
+DEFAULT_SOURCES_CONFIG = _REPO / "configs" / "sources.local.yaml"
+
 
 def run_step(args: list[str]) -> None:
     result = subprocess.run(args, check=False)
@@ -60,7 +63,8 @@ def main() -> None:
     ap.add_argument("--arxiv-out", default=str(DEFAULT_ARXIV_OUTPUT))
     ap.add_argument("--huggingface-out", default=str(DEFAULT_HUGGINGFACE_OUTPUT))
     ap.add_argument("--brief-out", default="")
-    ap.add_argument("--skip-huggingface", action="store_true")
+    ap.add_argument("--skip-hotspots", "--skip-huggingface", action="store_true",
+                    dest="skip_hotspots")
     ap.add_argument("--skip-enrich", action="store_true")
     ap.add_argument("--hotspot-limit", type=int, default=20)
     args = ap.parse_args()
@@ -85,21 +89,19 @@ def main() -> None:
     )
 
     hotspot_available = False
-    if not args.skip_huggingface:
-        hotspot_available = run_optional_step(
-            [
-                sys.executable,
-                str(Path(__file__).with_name("fetch_huggingface.py")),
-                "--config",
-                args.config,
-                "--out",
-                args.huggingface_out,
-                "--limit",
-                str(args.hotspot_limit),
-                *topic_args,
-            ],
-            "Hugging Face 热点抓取",
-        )
+    if not args.skip_hotspots:
+        multi_source_cmd = [
+            sys.executable,
+            str(Path(__file__).with_name("run_multi_source.py")),
+            "--config",
+            args.config,
+            "--out",
+            args.huggingface_out,
+            *topic_args,
+        ]
+        if DEFAULT_SOURCES_CONFIG.exists():
+            multi_source_cmd.extend(["--sources-config", str(DEFAULT_SOURCES_CONFIG)])
+        hotspot_available = run_optional_step(multi_source_cmd, "多源热点抓取")
 
     if not args.skip_enrich:
         enrich_args = [

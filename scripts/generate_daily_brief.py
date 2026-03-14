@@ -228,6 +228,22 @@ def load_hotspots(path: str) -> list[dict[str, Any]]:
     return [item for item in raw_items if isinstance(item, dict)]
 
 
+def _hfield(item: dict[str, Any], *keys: str) -> Any:
+    """Look up keys in item, then raw_payload, then engagement_metrics."""
+    for key in keys:
+        val = item.get(key)
+        if val is not None and val != "":
+            return val
+    for nested in ("raw_payload", "engagement_metrics"):
+        sub = item.get(nested)
+        if isinstance(sub, dict):
+            for key in keys:
+                val = sub.get(key)
+                if val is not None and val != "":
+                    return val
+    return None
+
+
 def hotspot_topic_ids(item: dict[str, Any]) -> list[str]:
     raw_ids = item.get("matched_topics")
     if isinstance(raw_ids, list):
@@ -252,11 +268,11 @@ def build_hotspot_note(item: dict[str, Any], topic_names: dict[str, str]) -> tup
     topic_ids = hotspot_topic_ids(item)
     if topic_ids:
         fragments.append(f"相关方向：{format_topics(topic_ids, topic_names)}")
-    rank = coerce_int(item.get("rank"))
+    rank = coerce_int(_hfield(item, "rank"))
     if rank is not None:
         fragments.append(f"排名第 {rank} 位")
-    upvotes = coerce_int(item.get("upvotes"))
-    num_comments = coerce_int(item.get("num_comments") or item.get("numComments"))
+    upvotes = coerce_int(_hfield(item, "upvotes"))
+    num_comments = coerce_int(_hfield(item, "num_comments", "numComments", "comments"))
     signal_parts: list[str] = []
     if upvotes is not None:
         signal_parts.append(f"{upvotes} 点赞")
@@ -289,14 +305,14 @@ def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) ->
             url = str(item.get("url") or item.get("link") or "").strip()
 
             meta_parts: list[str] = []
-            org = str(item.get("organization") or "").strip()
+            org = str(_hfield(item, "organization") or "").strip()
             if org:
                 meta_parts.append(f"机构：{org}")
-            rank = coerce_int(item.get("rank"))
+            rank = coerce_int(_hfield(item, "rank"))
             if rank is not None:
                 meta_parts.append(f"热榜第 {rank} 位")
-            upvotes = coerce_int(item.get("upvotes"))
-            num_comments = coerce_int(item.get("num_comments") or item.get("numComments"))
+            upvotes = coerce_int(_hfield(item, "upvotes"))
+            num_comments = coerce_int(_hfield(item, "num_comments", "numComments", "comments"))
             signal_parts: list[str] = []
             if upvotes:
                 signal_parts.append(f"{upvotes} 点赞")
@@ -306,7 +322,7 @@ def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) ->
                 meta_parts.append("信号：" + "、".join(signal_parts))
 
             summary_zh = str(item.get("summary_zh") or item.get("summaryZh") or "").strip()
-            ai_summary = str(item.get("ai_summary") or "").strip()
+            ai_summary = str(_hfield(item, "ai_summary") or "").strip()
             if summary_zh:
                 intro = f"中文摘要：{summary_zh}"
             elif ai_summary:
