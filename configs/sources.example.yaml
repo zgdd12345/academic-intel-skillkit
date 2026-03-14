@@ -1,0 +1,89 @@
+# configs/sources.example.yaml
+# Multi-source configuration for academic-intel-skillkit.
+# Copy to configs/sources.local.yaml and edit as needed.
+#
+# Each source has:
+#   enabled:               true/false (default false for new sources)
+#   requests_per_minute:   rate limit (polite values shown)
+#   max_retries:           HTTP retry attempts (exponential backoff)
+#   ...source-specific keys...
+#
+# Credentials can be provided inline (not recommended for git repos)
+# or via environment variables (preferred).
+
+sources:
+  # ── Tier 0: existing stable sources ──────────────────────────────────────
+  arxiv:
+    enabled: true
+    requests_per_minute: 3        # arXiv asks for politeness
+    max_retries: 3
+    lookback_days: 2
+    max_results_per_topic: 25
+
+  huggingface:
+    enabled: true
+    requests_per_minute: 10
+    max_retries: 3
+    limit: 20
+    sort: trending                # "trending" or "publishedAt"
+
+  # ── Tier 1: social discussion sources ────────────────────────────────────
+  reddit:
+    enabled: false                # no credentials needed; enable to activate
+    requests_per_minute: 20       # be polite to Reddit public API
+    max_retries: 3
+    subreddits:
+      - MachineLearning
+      - artificial
+      - LocalLLaMA
+      - learnmachinelearning
+    sort: hot                     # "hot" | "new" | "top"
+    limit_per_subreddit: 25
+    min_upvotes: 10               # ignore low-engagement posts
+
+  hackernews:
+    enabled: false                # no credentials needed; enable to activate
+    requests_per_minute: 30
+    max_retries: 3
+    search_queries:
+      - "arxiv machine learning"
+      - "large language model"
+      - "deep learning paper"
+      - "transformer model"
+    limit: 30                     # max stories per query
+    min_points: 10
+    lookback_hours: 48
+
+  github:
+    enabled: false
+    api_token: ""                 # or set GITHUB_TOKEN env var
+    # Authenticated: 30 req/min (search API)
+    # Unauthenticated: 10 req/min
+    requests_per_minute: 20
+    max_retries: 3
+    search_queries:
+      - "arxiv paper implementation"
+      - "machine learning paper"
+      - "LLM fine-tuning"
+    limit: 30                     # max issues per query
+    lookback_days: 7
+    min_stars: 0
+
+  # ── Tier 2: academic metadata sources ────────────────────────────────────
+  semantic_scholar:
+    enabled: false
+    api_key: ""                   # or set SEMANTIC_SCHOLAR_API_KEY env var
+    # With key: ~100 req/5min; without: ~100 req/5min (shared pool)
+    requests_per_minute: 10
+    max_retries: 3
+    max_results_per_topic: 20
+    lookback_days: 30
+
+  openalex:
+    enabled: false
+    email: ""                     # polite pool: higher rate limits
+    # With email: 100 req/sec; without: best-effort
+    requests_per_minute: 60
+    max_retries: 3
+    max_results_per_topic: 20
+    lookback_days: 30
