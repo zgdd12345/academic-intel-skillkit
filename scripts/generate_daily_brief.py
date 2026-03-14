@@ -42,6 +42,11 @@ def format_date(value: str | None) -> str:
     return parsed.date().isoformat() if parsed else "未知"
 
 
+def _strip_tags(text: str) -> str:
+    """Remove HTML/XML-like tags to prevent Obsidian rendering breakage."""
+    return re.sub(r"<[^>]+>", "", text)
+
+
 def truncate_report_text(text: str, word_limit: int = 48, char_limit: int = 120) -> str:
     clean_text = re.sub(r"\s+", " ", (text or "").strip())
     if not clean_text:
@@ -143,7 +148,7 @@ def topic_phrase(item: Any, topic_names: dict[str, str]) -> str:
 
 def build_report_summary(item: Any, topic_names: dict[str, str]) -> str:
     if item.summary_zh:
-        return f"中文摘要：{item.summary_zh.strip()}"
+        return f"中文摘要：{_strip_tags(item.summary_zh.strip())}"
     sentences = [
         f"{topic_phrase(item, topic_names)}，{relative_freshness(item.published_at)}，{signal_phrase(item.score)}。"
     ]
@@ -325,8 +330,8 @@ def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) ->
             if signal_parts:
                 meta_parts.append("信号：" + "、".join(signal_parts))
 
-            summary_zh = str(item.get("summary_zh") or item.get("summaryZh") or "").strip()
-            ai_summary = str(_hfield(item, "ai_summary") or "").strip()
+            summary_zh = _strip_tags(str(item.get("summary_zh") or item.get("summaryZh") or "").strip())
+            ai_summary = _strip_tags(str(_hfield(item, "ai_summary") or "").strip())
             if summary_zh:
                 intro = f"中文摘要：{summary_zh}"
             elif ai_summary:
@@ -346,8 +351,8 @@ def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) ->
         for item in group_items[3:]:
             title = str(item.get("title") or item.get("name") or "未命名热点").strip()
             url = str(item.get("url") or item.get("link") or "").strip()
-            summary_zh = str(item.get("summary_zh") or item.get("summaryZh") or "").strip()
-            ai_summary = str(item.get("ai_summary") or "").strip()
+            summary_zh = _strip_tags(str(item.get("summary_zh") or item.get("summaryZh") or "").strip())
+            ai_summary = _strip_tags(str(item.get("ai_summary") or "").strip())
             if summary_zh:
                 one_liner = truncate_report_text(summary_zh, word_limit=20, char_limit=50)
             elif ai_summary:
