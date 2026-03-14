@@ -72,7 +72,11 @@ def format_topics(item_topic_ids: list[str], topic_names: dict[str, str]) -> str
 
 def format_link(title: str, url: str) -> str:
     clean_title = title or "未命名论文"
-    return f"[{clean_title}]({url})" if url else clean_title
+    if url:
+        # Escape brackets in title to prevent Obsidian from treating [[...]] as wiki links
+        safe_title = clean_title.replace("[", "\\[").replace("]", "\\]")
+        return f"[{safe_title}]({url})"
+    return clean_title
 
 
 def coerce_int(value: Any) -> int | None:
