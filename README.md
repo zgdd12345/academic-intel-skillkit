@@ -416,6 +416,193 @@ python3 scripts/generate_daily_brief.py \
 - add topic-management helpers that safely edit local config files
 - add deeper paper-analysis workflows without tying the skill library to one specific host
 
+---
+
+## 多信息源架构（Multi-Source Architecture）
+
+> 本章节描述 `feature/new-sources` 分支中新增的可扩展信息源体系。
+> 代码位于 `src/`，与现有 `scripts/` 层并行共存，不影响原有 arXiv/HF 日报链路。
+
+### 新增信息源优先级
+
+| 批次 | 信息源 | 类型 | 认证 | 状态 |
+|------|--------|------|------|------|
+| Tier 0 | arXiv | 学术论文 | 无需 | ✅ 已迁移到 adapter |
+| Tier 0 | Hugging Face Papers | 学术热点 | 无需 | ✅ 已迁移到 adapter |
+| Tier 1 | Reddit | 社区讨论 | 无需（只读 JSON API） | ✅ 实现 |
+| Tier 1 | Hacker News | 社区讨论 | 无需（Algolia API） | ✅ 实现 |
+| Tier 1 | GitHub Issues/Discussions | 开发讨论 | 可选（GITHUB_TOKEN） | ✅ 实现 |
+| Tier 2 | Semantic Scholar | 论文元数据 | 可选（S2 API Key） | ✅ 实现 |
+| Tier 2 | OpenAlex | 论文元数据 | 可选（email polite pool） | ✅ 实现 |
+
+### 目录结构
+
+```
+src/
+├── sources/           # 所有 source adapters
+│   ├── base.py        # SourceAdapter ABC + RateLimiter + RetryConfig
+│   ├── arxiv.py       # arXiv Atom feed adapter
+│   ├── huggingface.py # HuggingFace daily_papers adapter
+│   ├── reddit.py      # Reddit JSON API adapter
+│   ├── hackernews.py  # HN Algolia Search API adapter
+│   ├── github.py      # GitHub Search Issues/Repos API adapter
+│   ├── semantic_scholar.py  # S2 Graph API adapter
+│   └── openalex.py    # OpenAlex Works API adapter
+├── normalize/
+│   ├── schema.py      # NormalizedItem + EngagementMetrics
+│   └── entity_resolver.py  # arXiv ID / GitHub / HF entity extraction & merge
+├── scoring/
+│   └── hot_score.py   # 多维 hot_score（freshness/engagement/depth/cross-platform/impl）
+├── pipelines/
+│   └── collect.py     # 多 source 编排 pipeline
+└── storage/
+    └── cache.py       # 文件级磁盘缓存（JSON + TTL）
+configs/
+└── sources.example.yaml  # 所有 source 的配置模板
+scripts/
+└── run_multi_source.py   # 多信息源 CLI 入口
+```
+
+### 统一 NormalizedItem 字段
+
+每个 adapter 输出 `NormalizedItem`，包含以下字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `source` | str | adapter 名称：arxiv / reddit / hackernews / github / … |
+| `source_type` | str | paper / discussion / repo / model / topic |
+| `external_id` | str | 源系统内唯一 ID |
+| `url` | str | 规范 URL |
+| `title` | str | 标题 |
+| `content` | str | 摘要 / 正文 |
+| `author` | str | 主要作者 / 用户名 |
+| `published_at` | str | ISO 8601 发布时间 |
+| `fetched_at` | str | ISO 8601 抓取时间 |
+| `engagement_metrics` | EngagementMetrics | upvotes / comments / stars / forks / citations |
+| `raw_tags` | list[str] | 原始 tag / category |
+| `language` | str | en / zh 等 |
+| `raw_payload` | dict | 原始 API 响应（供调试 / 未来扩展） |
+| `paper_ids` | list[str] | 提取的 arXiv ID |
+| `repo_urls` | list[str] | 提取的 GitHub repo URL |
+| `model_ids` | list[str] | 提取的 HuggingFace model ID |
+| `topic_scores` | dict | topic 匹配得分 |
+| `score` | float | hot_score（0–10） |
+
+### hot_score 计算公式
+
+```
+hot_score = 10 × Σ(weight_i × component_i)
+
+component          weight   说明
+freshness          0.30     指数衰减，半衰期 7 天
+engagement         0.25     log(upvotes + 2×comments + stars + 2×forks + 3×citations)
+discussion_depth   0.15     log(comments)，归一化到 [0,1]
+cross_platform     0.15     每多一个平台 +0.3，上限 1.0
+impl_signal        0.10     有 GitHub 链接 +0.5，有 demo 提及 +0.3
+topic_match        0.05     最佳 topic score / 5.0
+```
+
+### 配置新信息源
+
+```bash
+# 1. 复制配置模板
+cp configs/sources.example.yaml configs/sources.local.yaml
+
+# 2. 按需启用 source（默认 Tier 1/2 均为 disabled）
+#    编辑 configs/sources.local.yaml：
+#      sources.reddit.enabled: true
+#      sources.hackernews.enabled: true
+
+# 3. 可选：设置 token（用于更高速率限制）
+export GITHUB_TOKEN="your-token"
+export SEMANTIC_SCHOLAR_API_KEY="your-key"
+export OPENALEX_EMAIL="you@example.com"
+```
+
+### 运行多信息源 pipeline
+
+```bash
+# 运行所有已启用 source
+python scripts/run_multi_source.py \
+  --config config/research-topics.local.yaml \
+  --sources-config configs/sources.local.yaml \
+  --out output/multi-source.json
+
+# 只跑特定 source
+python scripts/run_multi_source.py \
+  --sources reddit hackernews \
+  --out output/social-signals.json
+
+# 不使用缓存（每次全量抓取）
+python scripts/run_multi_source.py --no-cache
+
+# 调试模式
+python scripts/run_multi_source.py --log-level DEBUG
+```
+
+### 限流策略
+
+| 信息源 | 默认 rpm | 认证后 rpm | 备注 |
+|--------|----------|-----------|------|
+| arXiv | 3 | — | 官方要求礼貌访问 |
+| HuggingFace | 10 | — | 公开 API |
+| Reddit | 20 | — | 无需认证，公开 JSON API |
+| HN Algolia | 30 | — | 无限制（合理使用） |
+| GitHub | 10 | 30 | GITHUB_TOKEN 获取更高限额 |
+| Semantic Scholar | 10 | 100 | API key 获取独立配额 |
+| OpenAlex | 10 | 100 | email 进入 polite pool |
+
+所有 adapter 内置指数退避重试（默认 3 次，基数 2s，上限 60s），
+`429 / 5xx` 状态码自动重试，单 source 失败不影响其他 source 继续运行。
+
+### 磁盘缓存
+
+默认开启，缓存目录 `output/.cache/`，TTL 3600 秒（1 小时）。
+
+```bash
+# 自定义缓存参数
+python scripts/run_multi_source.py \
+  --cache-dir /tmp/intel-cache \
+  --cache-ttl 7200
+
+# 完全禁用缓存
+python scripts/run_multi_source.py --no-cache
+```
+
+### 验收方法
+
+```bash
+# 运行所有测试（包含 64 个单测）
+conda run -n crawer python -m pytest tests/ -v
+
+# 快速冒烟测试（只跑新架构相关）
+conda run -n crawer python -m pytest \
+  tests/test_normalized_schema.py \
+  tests/test_entity_resolver.py \
+  tests/test_hot_score.py \
+  tests/test_source_adapters.py -v
+
+# 验证 arXiv/HF legacy pipeline 未被影响
+conda run -n crawer python -m pytest tests/test_mvp_cli.py -v
+
+# 运行 reddit + hn（需先启用 configs/sources.local.yaml）
+python scripts/run_multi_source.py \
+  --sources reddit hackernews \
+  --no-cache \
+  --log-level INFO
+```
+
+### 新增 Source 开发指南
+
+1. 在 `src/sources/` 新建 `mysource.py`
+2. 继承 `SourceAdapter`，实现 `_do_fetch(topics) -> list[NormalizedItem]`
+3. 使用 `self._http_get()` 进行网络请求（自动限流+重试）
+4. 在 `src/pipelines/collect.py` 的 `_ADAPTER_REGISTRY` 中注册
+5. 在 `configs/sources.example.yaml` 中添加配置模板
+6. 在 `tests/test_source_adapters.py` 中添加单元测试（mock 网络请求）
+
+---
+
 ### License
 
 MIT
