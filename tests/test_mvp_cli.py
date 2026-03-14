@@ -277,7 +277,7 @@ class MvpCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         content = out_path.read_text(encoding="utf-8")
         self.assertIn("Reward-Guided Agent Search", content)
-        self.assertIn("中文提示：Hugging Face 热榜第 1 位", content)
+        self.assertIn("提示：Hugging Face 热榜第 1 位", content)
         self.assertIn("已合并社区热点 JSON；当前仓库已提供最小可用的 `scripts/fetch_huggingface.py` 采集器。", content)
 
     def test_manage_topics_outputs_chinese_list_validate_and_detail(self) -> None:
@@ -452,15 +452,18 @@ class ReviewRegressionTests(unittest.TestCase):
             ):
                 run_daily_pipeline.main()
 
-            self.assertEqual(mock_run.call_count, 3)
+            # Pipeline now runs 4 steps: arXiv → HF → enrich → brief
+            self.assertEqual(mock_run.call_count, 4)
             arxiv_cmd = mock_run.call_args_list[0].args[0]
             hotspot_cmd = mock_run.call_args_list[1].args[0]
-            brief_cmd = mock_run.call_args_list[2].args[0]
+            enrich_cmd = mock_run.call_args_list[2].args[0]
+            brief_cmd = mock_run.call_args_list[3].args[0]
 
             self.assertIn("fetch_arxiv.py", arxiv_cmd[1])
             self.assertIn("--topic", arxiv_cmd)
             self.assertIn("agents", arxiv_cmd)
             self.assertIn("fetch_huggingface.py", hotspot_cmd[1])
+            self.assertIn("enrich_summaries.py", enrich_cmd[1])
             self.assertIn("generate_daily_brief.py", brief_cmd[1])
             self.assertIn(
                 "/tmp/ObsidianVault/Research_Intel/01_Daily/2026_03_13_Daily.md",
