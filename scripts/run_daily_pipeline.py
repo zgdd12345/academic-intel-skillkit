@@ -61,6 +61,7 @@ def main() -> None:
     ap.add_argument("--huggingface-out", default=str(DEFAULT_HUGGINGFACE_OUTPUT))
     ap.add_argument("--brief-out", default="")
     ap.add_argument("--skip-huggingface", action="store_true")
+    ap.add_argument("--skip-enrich", action="store_true")
     ap.add_argument("--hotspot-limit", type=int, default=20)
     args = ap.parse_args()
 
@@ -99,6 +100,19 @@ def main() -> None:
             ],
             "Hugging Face 热点抓取",
         )
+
+    if not args.skip_enrich:
+        enrich_args = [
+            sys.executable,
+            str(Path(__file__).with_name("enrich_summaries.py")),
+            "--config",
+            args.config,
+            "--arxiv",
+            args.arxiv_out,
+        ]
+        if hotspot_available:
+            enrich_args.extend(["--huggingface", args.huggingface_out])
+        run_optional_step(enrich_args, "LLM 摘要翻译")
 
     brief_command = [
         sys.executable,

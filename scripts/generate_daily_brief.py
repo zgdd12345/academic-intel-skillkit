@@ -199,15 +199,17 @@ def escape_pipe(text: str) -> str:
 def format_brief(items: list[Any], topic_names: dict[str, str]) -> str:
     if not items:
         return "_今天没有额外需要补看的论文。_"
-    rows = [
-        "| 论文标题 | 主题 | 发布日期 | 评分 |",
-        "| -------- | ---- | :------: | :--: |",
-    ]
+    lines: list[str] = []
     for item in items:
-        topic_label = escape_pipe(format_topics(topic_ids_for_item(item), topic_names))
-        link = format_link(escape_pipe(item.title or "未命名论文"), item.url)
-        rows.append(f"| {link} | {topic_label} | {format_date(item.published_at)} | {item.score:.1f} |")
-    return "\n".join(rows)
+        topic_label = format_topics(topic_ids_for_item(item), topic_names)
+        link = format_link(item.title or "未命名论文", item.url)
+        if item.summary_zh:
+            desc = truncate_report_text(item.summary_zh, word_limit=40, char_limit=80)
+        else:
+            desc = f"{topic_phrase(item, topic_names)}，{signal_phrase(item.score)}。"
+        lines.append(f"- **{link}** · {topic_label} · {format_date(item.published_at)} · {item.score:.1f}分")
+        lines.append(f"  {desc}")
+    return "\n".join(lines)
 
 
 def load_hotspots(path: str) -> list[dict[str, Any]]:
@@ -264,9 +266,38 @@ def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) ->
     for item in items[:5]:
         title = str(item.get("title") or item.get("name") or "未命名热点").strip()
         url = str(item.get("url") or item.get("link") or "").strip()
-        label, note = build_hotspot_note(item, topic_names)
+
+        meta_parts: list[str] = []
+        org = str(item.get("organization") or "").strip()
+        if org:
+            meta_parts.append(f"机构：{org}")
+        rank = coerce_int(item.get("rank"))
+        if rank is not None:
+            meta_parts.append(f"热榜第 {rank} 位")
+        signal_parts: list[str] = []
+        upvotes = coerce_int(item.get("upvotes"))
+        num_comments = coerce_int(item.get("num_comments") or item.get("numComments"))
+        if upvotes:
+            signal_parts.append(f"{upvotes} 点赞")
+        if num_comments:
+            signal_parts.append(f"{num_comments} 评论")
+        if signal_parts:
+            meta_parts.append("信号：" + "、".join(signal_parts))
+
+        summary_zh = str(item.get("summary_zh") or item.get("summaryZh") or "").strip()
+        ai_summary = str(item.get("ai_summary") or "").strip()
+        if summary_zh:
+            intro = f"中文摘要：{truncate_report_text(summary_zh, word_limit=60, char_limit=140)}"
+        elif ai_summary:
+            intro = f"工作简介：{truncate_report_text(ai_summary, word_limit=40, char_limit=120)}"
+        else:
+            _, note = build_hotspot_note(item, topic_names)
+            intro = f"提示：{note}"
+
         lines.append(f"- **{format_link(title, url)}**")
-        lines.append(f"  {label}：{note}")
+        if meta_parts:
+            lines.append(f"  {' | '.join(meta_parts)}")
+        lines.append(f"  {intro}")
     return "\n".join(lines)
 
 
@@ -303,12 +334,22 @@ def build_overview(
         if hotspots
         else "本次没有合并社区热点输入，不影响当前 arXiv 主链路。"
     )
-    return (
+    stats_line = (
         f"今天共整理 {len(ranked_candidates)} 篇候选论文，其中 {len(shortlisted_items)} 篇进入最终日报。"
         f"当前较活跃的方向主要集中在 {topic_summary}。"
         f"建议先看 {format_link(lead_item.title, lead_item.url)}，它的综合评分最高（{lead_item.score:.1f}）。"
         f"{hotspot_note}"
     )
+
+    key_lines: list[str] = ["**今日精选重点：**"]
+    for i, item in enumerate(focus_items, 1):
+        if item.summary_zh:
+            desc = truncate_report_text(item.summary_zh, word_limit=30, char_limit=60)
+        else:
+            desc = f"{format_topics(topic_ids_for_item(item), topic_names)}方向，{signal_phrase(item.score)}"
+        key_lines.append(f"{i}. {format_link(item.title, item.url)}：{desc}")
+    key_block = "\n> ".join(key_lines)
+    return f"{stats_line}\n> \n> {key_block}"
 
 
 def format_topic_snapshot(items: list[Any], topic_names: dict[str, str]) -> str:

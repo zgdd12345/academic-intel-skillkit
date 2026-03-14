@@ -6,6 +6,11 @@
 # Additional collectors and periodic reports are scaffold-only and intentionally
 # omitted from this starter file.
 
+llm:
+  # base_url: "https://your-relay.example.com/v1"  # or set LLM_BASE_URL env var
+  # api_key: "your-key"                             # or set LLM_API_KEY env var
+  model: "gpt-4o-mini"
+
 obsidian:
   vault_path: "/path/to/your/ObsidianVault"
   root_dir: "Research_Intel"

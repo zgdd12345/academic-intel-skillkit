@@ -1,0 +1,268 @@
+"""enrich_summaries.py — Translate English abstracts → Chinese summary_zh via LLM.
+
+Reads arxiv.json (and optionally huggingface.json), scores candidates to find the
+top-N shortlist, then calls an OpenAI-compatible API to fill in summary_zh for
+shortlisted items that have an English abstract but no Chinese summary.
+
+Config priority (highest → lowest):
+  1. CLI args  (--model, --base-url, --api-key)
+  2. Env vars  (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)
+  3. YAML config (llm.base_url, llm.api_key, llm.model)
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+# Allow running from the scripts/ directory directly
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from common import (
+    DEFAULT_ARXIV_OUTPUT,
+    DEFAULT_HUGGINGFACE_OUTPUT,
+    DEFAULT_LOCAL_CONFIG,
+    dump_json,
+    enabled_topics,
+    load_json,
+    load_yaml,
+    missing_local_config_message,
+    rank_candidates,
+    read_candidate_items,
+)
+
+TRANSLATE_PROMPT = (
+    "你是学术论文摘要翻译专家。请将以下arXiv论文英文摘要翻译为简洁准确的中文"
+    "（100字以内），保留关键技术术语：\n\n{summary}\n\n只输出中文翻译，不要任何其他内容。"
+)
+
+DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_TOP_N = 8
+
+
+def _load_config(config_path: str) -> dict[str, Any]:
+    path = Path(config_path)
+    if not path.exists():
+        print(missing_local_config_message(path), file=sys.stderr)
+        sys.exit(1)
+    result = load_yaml(config_path)
+    return result if isinstance(result, dict) else {}
+
+
+def _resolve_llm_settings(
+    config: dict[str, Any],
+    cli_base_url: str | None,
+    cli_api_key: str | None,
+    cli_model: str | None,
+) -> tuple[str | None, str | None, str]:
+    """Return (base_url, api_key, model) merging CLI > env > YAML."""
+    llm_cfg: dict[str, Any] = config.get("llm", {}) if isinstance(config.get("llm"), dict) else {}
+
+    base_url = (
+        cli_base_url
+        or os.environ.get("LLM_BASE_URL")
+        or llm_cfg.get("base_url")
+        or None
+    )
+    api_key = (
+        cli_api_key
+        or os.environ.get("LLM_API_KEY")
+        or llm_cfg.get("api_key")
+        or None
+    )
+    model = (
+        cli_model
+        or os.environ.get("LLM_MODEL")
+        or llm_cfg.get("model")
+        or DEFAULT_MODEL
+    )
+    return base_url, api_key, str(model)
+
+
+def _resolve_top_n(config: dict[str, Any], cli_top_n: int | None) -> int:
+    if cli_top_n is not None:
+        return cli_top_n
+    reporting = config.get("reporting", {})
+    if isinstance(reporting, dict):
+        raw = reporting.get("daily_top_n")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    return DEFAULT_TOP_N
+
+
+def _shortlisted_paper_ids(
+    arxiv_path: str,
+    huggingface_path: str,
+    config: dict[str, Any],
+    top_n: int,
+) -> set[str]:
+    """Score and rank candidates; return paper_ids of top-N."""
+    items = read_candidate_items(arxiv_path)
+    if huggingface_path:
+        items += read_candidate_items(huggingface_path)
+    topics = enabled_topics(config)
+    ranked = rank_candidates(items, topics)
+    shortlist = ranked[:top_n]
+    return {item.paper_id for item in shortlist if item.paper_id}
+
+
+def _call_llm(client: Any, model: str, summary: str) -> str:
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": TRANSLATE_PROMPT.format(summary=summary)}],
+        max_tokens=300,
+        temperature=0.3,
+    )
+    return response.choices[0].message.content.strip()
+
+
+def _enrich_items(
+    items: list[dict[str, Any]],
+    shortlisted_ids: set[str],
+    client: Any,
+    model: str,
+    dry_run: bool,
+) -> int:
+    """Mutate items in-place, adding summary_zh. Returns count of enriched items."""
+    enriched = 0
+    for item in items:
+        paper_id = item.get("paper_id") or item.get("paperId") or item.get("id") or ""
+        summary = (item.get("summary") or item.get("abstract") or "").strip()
+        summary_zh = (item.get("summary_zh") or item.get("summaryZh") or "").strip()
+
+        if paper_id not in shortlisted_ids:
+            continue
+        if not summary:
+            continue
+        if summary_zh:
+            continue
+
+        if dry_run:
+            print(f"[dry-run] Would translate paper_id={paper_id!r}:")
+            print(f"  {summary[:120]}{'...' if len(summary) > 120 else ''}")
+            enriched += 1
+            continue
+
+        try:
+            result = _call_llm(client, model, summary)
+            item["summary_zh"] = result
+            enriched += 1
+            print(f"  ✓ {paper_id}: {result[:60]}{'...' if len(result) > 60 else ''}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"警告：paper_id={paper_id!r} 翻译失败：{exc}", file=sys.stderr)
+
+    return enriched
+
+
+def _load_raw_items(path: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Load JSON, return (payload_dict, items_list). payload_dict is mutated in-place."""
+    payload = load_json(path, default={})
+    if isinstance(payload, list):
+        # Rare: top-level list — wrap it
+        wrapper: dict[str, Any] = {"items": payload}
+        return wrapper, payload
+    if isinstance(payload, dict):
+        if "items" not in payload:
+            payload["items"] = []
+        items = payload["items"]
+        if not isinstance(items, list):
+            payload["items"] = []
+            items = payload["items"]
+        return payload, items
+    wrapper = {"items": []}
+    return wrapper, wrapper["items"]
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description="用 LLM 为 arxiv.json 中的 top-N 候选论文翻译中文摘要。"
+    )
+    ap.add_argument("--arxiv", default=str(DEFAULT_ARXIV_OUTPUT), help="arxiv.json 路径")
+    ap.add_argument("--huggingface", default="", help="huggingface.json 路径（可选）")
+    ap.add_argument("--out", default="", help="输出路径（默认原地覆盖 --arxiv）")
+    ap.add_argument("--config", default=str(DEFAULT_LOCAL_CONFIG))
+    ap.add_argument("--model", default="", help="LLM 模型名（覆盖 env/config）")
+    ap.add_argument("--top-n", type=int, default=None, help="enrichment 的候选数量上限")
+    ap.add_argument("--base-url", default="", help="OpenAI-compatible base URL（覆盖 LLM_BASE_URL）")
+    ap.add_argument("--api-key", default="", help="API key（覆盖 LLM_API_KEY）")
+    ap.add_argument("--dry-run", action="store_true", help="打印将翻译的摘要，不真正调用 API")
+    args = ap.parse_args()
+
+    config = _load_config(args.config)
+    base_url, api_key, model = _resolve_llm_settings(
+        config,
+        args.base_url or None,
+        args.api_key or None,
+        args.model or None,
+    )
+    top_n = _resolve_top_n(config, args.top_n)
+    out_path = args.out or args.arxiv
+
+    if not args.dry_run:
+        if not base_url:
+            print(
+                "错误：未配置 LLM_BASE_URL（或 --base-url / llm.base_url）。跳过摘要翻译。",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not api_key:
+            print(
+                "错误：未配置 LLM_API_KEY（或 --api-key / llm.api_key）。跳过摘要翻译。",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        try:
+            from openai import OpenAI
+        except ImportError:
+            print("错误：openai 包未安装。请执行：pip install openai>=1.0", file=sys.stderr)
+            sys.exit(1)
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+    else:
+        client = None
+
+    # Score candidates to find the shortlist
+    shortlisted_ids = _shortlisted_paper_ids(
+        args.arxiv, args.huggingface, config, top_n
+    )
+    if not shortlisted_ids:
+        print("警告：shortlist 为空，没有可翻译的候选论文。", file=sys.stderr)
+        sys.exit(0)
+
+    print(f"LLM 摘要翻译：top_n={top_n}, model={model}, shortlist={len(shortlisted_ids)} 篇")
+
+    # Load raw JSON items (we mutate dicts in-place to preserve all original fields)
+    payload, items = _load_raw_items(args.arxiv)
+
+    count = _enrich_items(items, shortlisted_ids, client, model, dry_run=args.dry_run)
+
+    if args.dry_run:
+        print(f"[dry-run] 共 {count} 篇待翻译（未调用 API）。")
+        sys.exit(0)
+
+    # Write back arxiv
+    dump_json(out_path, payload)
+    print(f"完成：翻译 arXiv {count} 篇，已写入 {out_path}")
+
+    # Also enrich HF hotspot items (all of them, since count is small)
+    if args.huggingface and Path(args.huggingface).exists():
+        hf_payload, hf_items = _load_raw_items(args.huggingface)
+        all_hf_ids = {
+            (item.get("paper_id") or item.get("paperId") or item.get("id") or "").strip()
+            for item in hf_items
+        } - {""}
+        if all_hf_ids:
+            print(f"LLM 翻译 HF 热点：{len(all_hf_ids)} 篇")
+            hf_count = _enrich_items(hf_items, all_hf_ids, client, model, dry_run=False)
+            dump_json(args.huggingface, hf_payload)
+            print(f"完成：翻译 HF 热点 {hf_count} 篇，已写入 {args.huggingface}")
+
+
+if __name__ == "__main__":
+    main()
