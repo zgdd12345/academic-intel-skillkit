@@ -247,7 +247,7 @@ class MvpCliTests(unittest.TestCase):
         content = out_path.read_text(encoding="utf-8")
         self.assertIn("# 研究情报日报 ·", content)
         self.assertIn("[!abstract] 今日概览", content)
-        self.assertIn("## 优先阅读", content)
+        self.assertIn("## 最新工作", content)
         self.assertIn("中文摘要：提出一个面向复杂任务的多智能体工具使用规划框架。", content)
         self.assertIn("中文导读：", content)
         self.assertIn("当前稳定实现链路是 arXiv 抓取、归一化去重、主题匹配评分和 Markdown 日报渲染。", content)

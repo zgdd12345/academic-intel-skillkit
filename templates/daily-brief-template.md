@@ -1,4 +1,4 @@
-<!-- Canonical template for the current arXiv-only daily brief MVP.
+<!-- Canonical template for the daily brief.
 Used by scripts/generate_daily_brief.py by default.
 Optimized for Obsidian rendering with YAML frontmatter and callout blocks. -->
 ---
@@ -19,21 +19,9 @@ recommended: {{recommended_count}}
 
 ---
 
-## 优先阅读
+## 最新工作
 
-{{top_detailed}}
-
----
-
-## 快速扫描
-
-{{top_brief}}
-
----
-
-## 主题分布
-
-{{topic_snapshot}}
+{{latest_work}}
 
 ---
 
@@ -43,9 +31,9 @@ recommended: {{recommended_count}}
 
 ---
 
-## 建议动作
+## 建议关注的热点
 
-{{suggested_actions}}
+{{hotspot_analysis}}
 
 ---
 

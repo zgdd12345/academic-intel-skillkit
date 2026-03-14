@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from collections import Counter
@@ -51,12 +52,12 @@ def truncate_report_text(text: str, word_limit: int = 48, char_limit: int = 120)
 
 
 def format_authors(authors: list[str] | None) -> str:
-    clean_authors = [author for author in authors or [] if author]
-    if not clean_authors:
+    clean = [a for a in (authors or []) if a]
+    if not clean:
         return ""
-    if len(clean_authors) <= 4:
-        return ", ".join(clean_authors)
-    return ", ".join(clean_authors[:4]) + ", et al."
+    if len(clean) == 1:
+        return clean[0]
+    return f"{clean[0]} 等"
 
 
 def topic_ids_for_item(item: Any) -> list[str]:
@@ -136,18 +137,16 @@ def topic_phrase(item: Any, topic_names: dict[str, str]) -> str:
     return "当前主题匹配信号有限"
 
 
-def build_report_summary(item: Any, topic_names: dict[str, str], detailed: bool = False) -> str:
+def build_report_summary(item: Any, topic_names: dict[str, str]) -> str:
     if item.summary_zh:
-        return f"中文摘要：{truncate_report_text(item.summary_zh, word_limit=60, char_limit=140)}"
-
+        return f"中文摘要：{item.summary_zh.strip()}"
     sentences = [
         f"{topic_phrase(item, topic_names)}，{relative_freshness(item.published_at)}，{signal_phrase(item.score)}。"
     ]
-    if detailed:
-        if item.summary:
-            sentences.append("当前 MVP 尚未内置自动翻译，因此建议结合论文链接中的原始摘要与正文继续判断是否进入深读。")
-        else:
-            sentences.append("当前条目没有可用摘要，建议优先检查标题、作者和论文链接页中的原始信息。")
+    if item.summary:
+        sentences.append("当前 MVP 尚未内置自动翻译，因此建议结合论文链接中的原始摘要与正文继续判断是否进入深读。")
+    else:
+        sentences.append("当前条目没有可用摘要，建议优先检查标题、作者和论文链接页中的原始信息。")
     return "中文导读：" + "".join(sentences)
 
 
@@ -175,41 +174,50 @@ def build_metadata_line(item: Any, topic_names: dict[str, str]) -> str:
     return " | ".join(metadata)
 
 
-def format_detailed(items: list[Any], topic_names: dict[str, str]) -> str:
-    if not items:
+def format_latest_work(
+    detailed_items: list[Any],
+    brief_items: list[Any],
+    topic_names: dict[str, str],
+) -> str:
+    if not detailed_items and not brief_items:
         return "_今天没有匹配到候选论文。_"
-    blocks: list[str] = []
-    for item in items:
+
+    parts: list[str] = []
+
+    # Detailed callout blocks
+    detail_blocks: list[str] = []
+    for item in detailed_items:
         title_link = format_link(item.title, item.url)
         metadata = build_metadata_line(item, topic_names)
-        summary = build_report_summary(item, topic_names, detailed=True)
-        blocks.append("\n".join([
+        summary = build_report_summary(item, topic_names)
+        detail_blocks.append("\n".join([
             f"> [!tip] {title_link}",
             f"> {metadata}",
             ">",
             f"> {summary}",
         ]))
-    return "\n\n".join(blocks)
+    if detail_blocks:
+        parts.append("\n\n".join(detail_blocks))
 
+    # Quick-scan bullet list — paper ID is mandatory per spec
+    if brief_items:
+        brief_lines: list[str] = []
+        for item in brief_items:
+            topic_label = format_topics(topic_ids_for_item(item), topic_names)
+            link = format_link(item.title or "未命名论文", item.url)
+            paper_id = item.paper_id or ""
+            if item.summary_zh:
+                desc = item.summary_zh.strip()
+            else:
+                desc = f"{topic_phrase(item, topic_names)}，{signal_phrase(item.score)}。"
+            id_prefix = f"`{paper_id}` " if paper_id else ""
+            brief_lines.append(
+                f"- {id_prefix}**{link}** · {topic_label} · {format_date(item.published_at)} · {item.score:.1f}分"
+            )
+            brief_lines.append(f"  {desc}")
+        parts.append("\n".join(brief_lines))
 
-def escape_pipe(text: str) -> str:
-    return text.replace("|", "\\|")
-
-
-def format_brief(items: list[Any], topic_names: dict[str, str]) -> str:
-    if not items:
-        return "_今天没有额外需要补看的论文。_"
-    lines: list[str] = []
-    for item in items:
-        topic_label = format_topics(topic_ids_for_item(item), topic_names)
-        link = format_link(item.title or "未命名论文", item.url)
-        if item.summary_zh:
-            desc = truncate_report_text(item.summary_zh, word_limit=40, char_limit=80)
-        else:
-            desc = f"{topic_phrase(item, topic_names)}，{signal_phrase(item.score)}。"
-        lines.append(f"- **{link}** · {topic_label} · {format_date(item.published_at)} · {item.score:.1f}分")
-        lines.append(f"  {desc}")
-    return "\n".join(lines)
+    return "\n\n".join(parts)
 
 
 def load_hotspots(path: str) -> list[dict[str, Any]]:
@@ -262,43 +270,75 @@ def build_hotspot_note(item: dict[str, Any], topic_names: dict[str, str]) -> tup
 def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) -> str:
     if not items:
         return "_暂无社区热点数据；这不会影响当前 arXiv 主链路日报生成。_"
-    lines: list[str] = []
-    for item in items[:5]:
-        title = str(item.get("title") or item.get("name") or "未命名热点").strip()
-        url = str(item.get("url") or item.get("link") or "").strip()
 
-        meta_parts: list[str] = []
-        org = str(item.get("organization") or "").strip()
-        if org:
-            meta_parts.append(f"机构：{org}")
-        rank = coerce_int(item.get("rank"))
-        if rank is not None:
-            meta_parts.append(f"热榜第 {rank} 位")
-        signal_parts: list[str] = []
-        upvotes = coerce_int(item.get("upvotes"))
-        num_comments = coerce_int(item.get("num_comments") or item.get("numComments"))
-        if upvotes:
-            signal_parts.append(f"{upvotes} 点赞")
-        if num_comments:
-            signal_parts.append(f"{num_comments} 评论")
-        if signal_parts:
-            meta_parts.append("信号：" + "、".join(signal_parts))
+    # Group by source/platform
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        source = str(item.get("source") or item.get("platform") or "其他").strip()
+        if source not in groups:
+            groups[source] = []
+        groups[source].append(item)
 
-        summary_zh = str(item.get("summary_zh") or item.get("summaryZh") or "").strip()
-        ai_summary = str(item.get("ai_summary") or "").strip()
-        if summary_zh:
-            intro = f"中文摘要：{truncate_report_text(summary_zh, word_limit=60, char_limit=140)}"
-        elif ai_summary:
-            intro = f"工作简介：{truncate_report_text(ai_summary, word_limit=40, char_limit=120)}"
-        else:
-            _, note = build_hotspot_note(item, topic_names)
-            intro = f"提示：{note}"
+    sections: list[str] = []
+    for source, group_items in groups.items():
+        section_parts: list[str] = [f"### {source}"]
 
-        lines.append(f"- **{format_link(title, url)}**")
-        if meta_parts:
-            lines.append(f"  {' | '.join(meta_parts)}")
-        lines.append(f"  {intro}")
-    return "\n".join(lines)
+        # First 3: full callout blocks
+        for item in group_items[:3]:
+            title = str(item.get("title") or item.get("name") or "未命名热点").strip()
+            url = str(item.get("url") or item.get("link") or "").strip()
+
+            meta_parts: list[str] = []
+            org = str(item.get("organization") or "").strip()
+            if org:
+                meta_parts.append(f"机构：{org}")
+            rank = coerce_int(item.get("rank"))
+            if rank is not None:
+                meta_parts.append(f"热榜第 {rank} 位")
+            upvotes = coerce_int(item.get("upvotes"))
+            num_comments = coerce_int(item.get("num_comments") or item.get("numComments"))
+            signal_parts: list[str] = []
+            if upvotes:
+                signal_parts.append(f"{upvotes} 点赞")
+            if num_comments:
+                signal_parts.append(f"{num_comments} 评论")
+            if signal_parts:
+                meta_parts.append("信号：" + "、".join(signal_parts))
+
+            summary_zh = str(item.get("summary_zh") or item.get("summaryZh") or "").strip()
+            ai_summary = str(item.get("ai_summary") or "").strip()
+            if summary_zh:
+                intro = f"中文摘要：{summary_zh}"
+            elif ai_summary:
+                intro = f"工作简介：{truncate_report_text(ai_summary, word_limit=40, char_limit=120)}"
+            else:
+                _, note = build_hotspot_note(item, topic_names)
+                intro = f"提示：{note}"
+
+            block_lines = [f"> [!tip] {format_link(title, url)}"]
+            if meta_parts:
+                block_lines.append(f"> {' | '.join(meta_parts)}")
+            block_lines.append(">")
+            block_lines.append(f"> {intro}")
+            section_parts.append("\n".join(block_lines))
+
+        # Remaining: news-headline one-liners
+        for item in group_items[3:]:
+            title = str(item.get("title") or item.get("name") or "未命名热点").strip()
+            url = str(item.get("url") or item.get("link") or "").strip()
+            summary_zh = str(item.get("summary_zh") or item.get("summaryZh") or "").strip()
+            ai_summary = str(item.get("ai_summary") or "").strip()
+            if summary_zh:
+                one_liner = truncate_report_text(summary_zh, word_limit=20, char_limit=50)
+            elif ai_summary:
+                one_liner = truncate_report_text(ai_summary, word_limit=20, char_limit=50)
+            else:
+                one_liner = str(item.get("source") or item.get("platform") or "社区").strip() + " 上引发讨论"
+            section_parts.append(f"- **{format_link(title, url)}** — {one_liner}")
+
+        sections.append("\n\n".join(section_parts))
+
+    return "\n\n".join(sections)
 
 
 def count_topics(items: list[Any]) -> Counter[str]:
@@ -329,66 +369,89 @@ def build_overview(
         topic_summary = "当前还没有形成稳定的主题聚类"
 
     lead_item = focus_items[0]
-    hotspot_note = (
-        f"另外合并了 {len(hotspots)} 条社区热点线索。"
-        if hotspots
-        else "本次没有合并社区热点输入，不影响当前 arXiv 主链路。"
-    )
-    stats_line = (
-        f"今天共整理 {len(ranked_candidates)} 篇候选论文，其中 {len(shortlisted_items)} 篇进入最终日报。"
-        f"当前较活跃的方向主要集中在 {topic_summary}。"
-        f"建议先看 {format_link(lead_item.title, lead_item.url)}，它的综合评分最高（{lead_item.score:.1f}）。"
-        f"{hotspot_note}"
-    )
+    if lead_item.summary_zh:
+        lead_desc = lead_item.summary_zh.strip()
+        first_period = lead_desc.find("。")
+        if 0 < first_period < 80:
+            lead_desc = lead_desc[:first_period + 1]
+        elif len(lead_desc) > 80:
+            lead_desc = lead_desc[:80] + "…"
+    else:
+        lead_desc = f"{topic_phrase(lead_item, topic_names)}，{signal_phrase(lead_item.score)}。"
 
-    key_lines: list[str] = ["**今日精选重点：**"]
-    for i, item in enumerate(focus_items, 1):
-        if item.summary_zh:
-            desc = truncate_report_text(item.summary_zh, word_limit=30, char_limit=60)
+    sentences = [
+        f"今日共整理 {len(ranked_candidates)} 篇候选论文，{len(shortlisted_items)} 篇入选日报。"
+        f"当前较活跃的方向集中在 {topic_summary}。"
+        f"最新亮点：{format_link(lead_item.title, lead_item.url)}（评分 {lead_item.score:.1f}），{lead_desc}"
+    ]
+
+    if hotspots:
+        top_hotspot = hotspots[0]
+        hs_title = str(top_hotspot.get("title") or top_hotspot.get("name") or "未命名热点").strip()
+        hs_url = str(top_hotspot.get("url") or top_hotspot.get("link") or "").strip()
+        hs_source = str(top_hotspot.get("source") or top_hotspot.get("platform") or "社区").strip()
+        sentences.append(f"社区热点方面，{format_link(hs_title, hs_url)} 在 {hs_source} 上引发关注。")
+
+    return "".join(sentences)
+
+
+def format_hotspot_analysis(
+    detailed_items: list[Any],
+    brief_items: list[Any],
+    hotspot_items: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> str:
+    llm_cfg = config.get("llm", {}) if isinstance(config.get("llm"), dict) else {}
+    base_url = os.environ.get("LLM_BASE_URL") or llm_cfg.get("base_url")
+    api_key = os.environ.get("LLM_API_KEY") or llm_cfg.get("api_key")
+    model = os.environ.get("LLM_MODEL") or llm_cfg.get("model") or "gpt-4o-mini"
+
+    if not base_url or not api_key:
+        return "_（未配置 LLM，热点趋势分析不可用。请设置 LLM_BASE_URL 和 LLM_API_KEY 以启用此功能。）_"
+
+    try:
+        from openai import OpenAI  # noqa: PLC0415
+    except ImportError:
+        return "_（openai 包未安装，热点趋势分析不可用。请执行：pip install openai>=1.0）_"
+
+    item_descs: list[str] = []
+    for item in detailed_items + brief_items:
+        title = item.title or "未命名"
+        summary = item.summary_zh or item.summary or ""
+        if summary:
+            item_descs.append(f"- 论文：{title}\n  摘要：{summary[:200]}")
         else:
-            desc = f"{format_topics(topic_ids_for_item(item), topic_names)}方向，{signal_phrase(item.score)}"
-        key_lines.append(f"{i}. {format_link(item.title, item.url)}：{desc}")
-    key_block = "\n> ".join(key_lines)
-    return f"{stats_line}\n> \n> {key_block}"
+            item_descs.append(f"- 论文：{title}")
+    for item in hotspot_items:
+        title = str(item.get("title") or item.get("name") or "未命名热点").strip()
+        desc = str(item.get("summary_zh") or item.get("summaryZh") or item.get("ai_summary") or "").strip()
+        if desc:
+            item_descs.append(f"- 热点：{title}\n  简介：{desc[:200]}")
+        else:
+            item_descs.append(f"- 热点：{title}")
 
+    if not item_descs:
+        return "_（今天没有足够的数据生成热点趋势分析。）_"
 
-def format_topic_snapshot(items: list[Any], topic_names: dict[str, str]) -> str:
-    if not items:
-        return "_今天没有形成可汇总的主题观察。_"
-
-    grouped: dict[str, list[Any]] = {}
-    for item in items:
-        topic_ids = topic_ids_for_item(item)
-        primary_topic_id = topic_ids[0] if topic_ids else ""
-        grouped.setdefault(primary_topic_id, []).append(item)
-
-    blocks: list[str] = []
-    ordered_groups = sorted(
-        grouped.items(),
-        key=lambda entry: (
-            -len(entry[1]),
-            -max(candidate.score for candidate in entry[1]),
-            topic_names.get(entry[0], entry[0] or "未分类"),
-        ),
+    prompt = (
+        "你是研究情报分析专家。以下是今日学术论文精选和社区热点，请给出3-5个值得关注的研究热点趋势分析，"
+        "以简洁的中文段落形式输出，不要使用列表。重点关注技术趋势、交叉方向和新兴话题。\n\n"
+        + "\n".join(item_descs)
+        + "\n\n只输出趋势分析内容，不要任何标题或前言。"
     )
-    for topic_id, group in ordered_groups[:5]:
-        topic_label = topic_names.get(topic_id, topic_id) if topic_id else "未分类"
-        top_item = max(group, key=lambda candidate: candidate.score)
-        cross_topics = [
-            topic_names.get(extra_topic_id, extra_topic_id)
-            for candidate in group
-            for extra_topic_id in topic_ids_for_item(candidate)[1:3]
-        ]
-        seen_cross_topics: list[str] = []
-        for label in cross_topics:
-            if label and label not in seen_cross_topics:
-                seen_cross_topics.append(label)
-        block_lines = [f"> [!abstract]- {topic_label}  ·  {len(group)} 篇入选"]
-        block_lines.append(f"> **最高优先项**：{format_link(top_item.title, top_item.url)}（评分 {top_item.score:.1f}）")
-        if seen_cross_topics:
-            block_lines.append(f"> **跨主题关联**：{', '.join(seen_cross_topics[:2])}")
-        blocks.append("\n".join(block_lines))
-    return "\n\n".join(blocks)
+
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        response = client.chat.completions.create(
+            model=str(model),
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.5,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as exc:  # noqa: BLE001
+        print(f"警告：热点趋势分析 LLM 调用失败：{exc}", file=sys.stderr)
+        return "_（热点趋势分析生成失败，请检查 LLM 配置。）_"
 
 
 def format_source_notes(semantic_scholar_path: str, hotspot_path: str) -> str:
@@ -416,23 +479,6 @@ def format_source_notes(semantic_scholar_path: str, hotspot_path: str) -> str:
         lines.append("本次未提供社区热点 JSON，因此社区热点板块只显示空状态说明。")
 
     return "\n".join(f"> {line}" for line in lines)
-
-
-def format_suggested_actions(items: list[Any], topic_names: dict[str, str]) -> str:
-    if not items:
-        return "- 今天没有新增深读建议。"
-    lines: list[str] = []
-    for index, item in enumerate(items[:2], start=1):
-        topic_label = format_topics(topic_ids_for_item(item), topic_names)
-        if index == 1:
-            lines.append(
-                f"- 优先阅读 {format_link(item.title, item.url)}：它在 {topic_label} 上的综合评分最高（{item.score:.1f}），适合先判断是否进入后续深读。"
-            )
-            continue
-        lines.append(
-            f"- 补充扫描 {format_link(item.title, item.url)}：这篇论文可以作为 {topic_label} 方向的第二优先项，帮助完善今天的观察面。"
-        )
-    return "\n".join(lines)
 
 
 def emit_config_diagnostics(config: dict[str, Any]) -> None:
@@ -497,7 +543,6 @@ def main() -> None:
     detailed_items = high_signal_items[:detailed_top_n]
     brief_items = high_signal_items[detailed_top_n:]
     hotspots = load_hotspots(args.huggingface)
-    recommended_items = detailed_items[:2]
 
     content = render_template(
         template,
@@ -507,12 +552,10 @@ def main() -> None:
             "candidate_count": str(len(ranked_candidates)),
             "high_signal_count": str(len(high_signal_items)),
             "hotspot_count": str(len(hotspots)),
-            "recommended_count": str(len(recommended_items)),
-            "top_detailed": format_detailed(detailed_items, topic_names),
-            "top_brief": format_brief(brief_items, topic_names),
-            "topic_snapshot": format_topic_snapshot(high_signal_items, topic_names),
+            "recommended_count": str(len(detailed_items)),
+            "latest_work": format_latest_work(detailed_items, brief_items, topic_names),
             "hotspots": format_hotspots(hotspots, topic_names),
-            "suggested_actions": format_suggested_actions(recommended_items, topic_names),
+            "hotspot_analysis": format_hotspot_analysis(detailed_items, brief_items, hotspots, config),
             "source_notes": format_source_notes(args.semantic_scholar, args.huggingface),
         },
     )
