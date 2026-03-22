@@ -19,6 +19,7 @@ from common import (
 )
 
 _REPO = Path(__file__).resolve().parents[1]
+_SCRIPTS_DIR = Path(__file__).resolve().parent
 DEFAULT_SOURCES_CONFIG = _REPO / "configs" / "sources.local.yaml"
 
 
@@ -34,6 +35,37 @@ def run_optional_step(args: list[str], label: str) -> bool:
         return True
     print(f"警告：{label} 失败，但本次仍继续生成日报。", file=sys.stderr)
     return False
+
+
+def run_parallel_steps(
+    steps: list[tuple[list[str], str, bool]],
+) -> dict[str, bool]:
+    """Run steps in parallel via Popen. Returns {label: success}.
+
+    Each step is (cmd, label, required). Required steps cause SystemExit on failure.
+    """
+    procs: list[tuple[subprocess.Popen[bytes], str, bool]] = []
+    try:
+        for cmd, label, required in steps:
+            procs.append((subprocess.Popen(cmd), label, required))
+
+        results: dict[str, bool] = {}
+        for proc, label, required in procs:
+            rc = proc.wait()
+            if required and rc != 0:
+                for p, _, _ in procs:
+                    if p.poll() is None:
+                        p.terminate()
+                raise SystemExit(rc)
+            if rc != 0:
+                print(f"警告：{label} 失败，但本次仍继续生成日报。", file=sys.stderr)
+            results[label] = rc == 0
+        return results
+    except KeyboardInterrupt:
+        for p, _, _ in procs:
+            if p.poll() is None:
+                p.terminate()
+        raise
 
 
 def load_config(config_path: str) -> dict[str, Any]:
@@ -53,6 +85,126 @@ def resolve_brief_out(config: dict[str, Any], configured_path: str, target_date:
     return str(DEFAULT_DAILY_BRIEF_OUTPUT)
 
 
+def _build_arxiv_cmd(args: argparse.Namespace, topic_args: list[str]) -> list[str]:
+    return [
+        sys.executable,
+        str(_SCRIPTS_DIR / "fetch_arxiv.py"),
+        "--config", args.config,
+        "--out", args.arxiv_out,
+        *topic_args,
+    ]
+
+
+def _build_multi_source_cmd(args: argparse.Namespace, topic_args: list[str]) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(_SCRIPTS_DIR / "run_multi_source.py"),
+        "--config", args.config,
+        "--out", args.huggingface_out,
+        *topic_args,
+    ]
+    if DEFAULT_SOURCES_CONFIG.exists():
+        cmd.extend(["--sources-config", str(DEFAULT_SOURCES_CONFIG)])
+    return cmd
+
+
+def _build_enrich_cmd(
+    args: argparse.Namespace,
+    *,
+    enrich_target: str = "all",
+    include_huggingface: bool = False,
+) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(_SCRIPTS_DIR / "enrich_summaries.py"),
+        "--config", args.config,
+        "--arxiv", args.arxiv_out,
+        "--enrich-target", enrich_target,
+    ]
+    if include_huggingface:
+        cmd.extend(["--huggingface", args.huggingface_out])
+    return cmd
+
+
+def _build_brief_cmd(
+    args: argparse.Namespace,
+    brief_out: str,
+    hotspot_available: bool,
+) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(_SCRIPTS_DIR / "generate_daily_brief.py"),
+        "--config", args.config,
+        "--arxiv", args.arxiv_out,
+        "--out", brief_out,
+    ]
+    if hotspot_available:
+        cmd.extend(["--huggingface", args.huggingface_out])
+    return cmd
+
+
+def _run_serial(args: argparse.Namespace, brief_out: str, topic_args: list[str]) -> bool:
+    """Original serial pipeline. Returns hotspot_available."""
+    run_step(_build_arxiv_cmd(args, topic_args))
+
+    hotspot_available = False
+    if not args.skip_hotspots:
+        hotspot_available = run_optional_step(
+            _build_multi_source_cmd(args, topic_args), "多源热点抓取"
+        )
+
+    if not args.skip_enrich:
+        run_optional_step(
+            _build_enrich_cmd(args, include_huggingface=hotspot_available),
+            "LLM 摘要翻译",
+        )
+
+    run_step(_build_brief_cmd(args, brief_out, hotspot_available))
+    return hotspot_available
+
+
+def _run_parallel(args: argparse.Namespace, brief_out: str, topic_args: list[str]) -> bool:
+    """Parallel pipeline. Returns hotspot_available."""
+    arxiv_cmd = _build_arxiv_cmd(args, topic_args)
+
+    # Phase 1: parallel fetch
+    if not args.skip_hotspots:
+        multi_source_cmd = _build_multi_source_cmd(args, topic_args)
+        fetch_results = run_parallel_steps([
+            (arxiv_cmd, "arXiv 抓取", True),
+            (multi_source_cmd, "多源热点抓取", False),
+        ])
+        hotspot_available = fetch_results.get("多源热点抓取", False)
+    else:
+        run_step(arxiv_cmd)
+        hotspot_available = False
+
+    # Phase 2: parallel enrich
+    if not args.skip_enrich:
+        enrich_steps: list[tuple[list[str], str, bool]] = [
+            (
+                _build_enrich_cmd(
+                    args, enrich_target="arxiv", include_huggingface=hotspot_available
+                ),
+                "arXiv 摘要翻译",
+                False,
+            ),
+        ]
+        if hotspot_available:
+            enrich_steps.append((
+                _build_enrich_cmd(
+                    args, enrich_target="huggingface", include_huggingface=True
+                ),
+                "HF 热点翻译",
+                False,
+            ))
+        run_parallel_steps(enrich_steps)
+
+    # Phase 3: brief generation
+    run_step(_build_brief_cmd(args, brief_out, hotspot_available))
+    return hotspot_available
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="串联 arXiv 抓取、可选热点抓取与日报生成，供 OpenClaw/cron 直接按单命令调度。"
@@ -67,6 +219,8 @@ def main() -> None:
                     dest="skip_hotspots")
     ap.add_argument("--skip-enrich", action="store_true")
     ap.add_argument("--hotspot-limit", type=int, default=20)
+    ap.add_argument("--no-parallel", action="store_true",
+                    help="禁用并行执行，回退到串行模式（用于调试）")
     args = ap.parse_args()
 
     if args.hotspot_limit <= 0:
@@ -76,59 +230,10 @@ def main() -> None:
     brief_out = resolve_brief_out(config, args.brief_out, args.date)
     topic_args = [value for topic in args.topic for value in ("--topic", topic)]
 
-    run_step(
-        [
-            sys.executable,
-            str(Path(__file__).with_name("fetch_arxiv.py")),
-            "--config",
-            args.config,
-            "--out",
-            args.arxiv_out,
-            *topic_args,
-        ]
-    )
-
-    hotspot_available = False
-    if not args.skip_hotspots:
-        multi_source_cmd = [
-            sys.executable,
-            str(Path(__file__).with_name("run_multi_source.py")),
-            "--config",
-            args.config,
-            "--out",
-            args.huggingface_out,
-            *topic_args,
-        ]
-        if DEFAULT_SOURCES_CONFIG.exists():
-            multi_source_cmd.extend(["--sources-config", str(DEFAULT_SOURCES_CONFIG)])
-        hotspot_available = run_optional_step(multi_source_cmd, "多源热点抓取")
-
-    if not args.skip_enrich:
-        enrich_args = [
-            sys.executable,
-            str(Path(__file__).with_name("enrich_summaries.py")),
-            "--config",
-            args.config,
-            "--arxiv",
-            args.arxiv_out,
-        ]
-        if hotspot_available:
-            enrich_args.extend(["--huggingface", args.huggingface_out])
-        run_optional_step(enrich_args, "LLM 摘要翻译")
-
-    brief_command = [
-        sys.executable,
-        str(Path(__file__).with_name("generate_daily_brief.py")),
-        "--config",
-        args.config,
-        "--arxiv",
-        args.arxiv_out,
-        "--out",
-        brief_out,
-    ]
-    if hotspot_available:
-        brief_command.extend(["--huggingface", args.huggingface_out])
-    run_step(brief_command)
+    if args.no_parallel:
+        hotspot_available = _run_serial(args, brief_out, topic_args)
+    else:
+        hotspot_available = _run_parallel(args, brief_out, topic_args)
 
     print(
         f"日常情报链路完成：arXiv={display_path(args.arxiv_out)} | "

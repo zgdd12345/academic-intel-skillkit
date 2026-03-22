@@ -36,8 +36,10 @@ python3 scripts/manage_topics.py --validate
 python3 scripts/manage_topics.py --list
 python3 scripts/manage_topics.py --query-plan
 
-# Full daily pipeline — arXiv + HuggingFace only (stable)
+# Full daily pipeline — parallel fetch + enrich (default)
 python3 scripts/run_daily_pipeline.py
+# Serial mode (for debugging)
+python3 scripts/run_daily_pipeline.py --no-parallel
 
 # Multi-source pipeline — adds Reddit, HN, GitHub, S2, OpenAlex
 python3 scripts/run_multi_source.py \
@@ -49,6 +51,12 @@ python3 scripts/run_multi_source.py \
 python3 scripts/enrich_summaries.py \
   --arxiv output/arxiv.json \
   --top-n 8
+# Enrich only arXiv or only HF hotspots (used by parallel pipeline)
+python3 scripts/enrich_summaries.py \
+  --arxiv output/arxiv.json --enrich-target arxiv
+python3 scripts/enrich_summaries.py \
+  --arxiv output/arxiv.json --huggingface output/huggingface.json \
+  --enrich-target huggingface
 # Requires LLM_BASE_URL / LLM_API_KEY / LLM_MODEL env vars (or llm: block in YAML config)
 
 # Individual steps
@@ -58,6 +66,14 @@ python3 scripts/generate_daily_brief.py \
   --arxiv output/arxiv.json \
   --huggingface output/huggingface.json \
   --out output/daily-brief.md
+
+# Weekly report (past 7 days)
+python3 scripts/build_periodic_report.py --period weekly
+# Monthly report (current month)
+python3 scripts/build_periodic_report.py --period monthly
+# Dry run / skip LLM
+python3 scripts/build_periodic_report.py --period weekly --dry-run
+python3 scripts/build_periodic_report.py --period weekly --skip-llm
 
 # Run tests (use crawer env)
 conda run -n crawer python -m pytest tests/test_mvp_cli.py
@@ -78,7 +94,9 @@ conda run -n crawer python -m pytest tests/test_mvp_cli.py
    - `run_multi_source.py` — Multi-source pipeline (Reddit, HN, GitHub, S2, OpenAlex); output feeds into `generate_daily_brief.py`
    - `enrich_summaries.py` — LLM-translates top-N English abstracts → `summary_zh` via OpenAI-compatible API
    - `manage_topics.py` — Read-only topic inspection (no mutation)
-   - `build_periodic_report.py` — Scaffold placeholder for weekly/monthly reports (no real logic yet)
+   - `build_periodic_report.py` — Weekly/monthly report generator; parses daily briefs, aggregates, calls LLM for narrative
+   - `parse_daily_briefs.py` — Module: parses daily brief Markdown back into structured data
+   - `aggregate_period.py` — Module: cross-day deduplication, topic trends, threshold checking
 
 3. **Library Layer** (`src/`) — Reusable Python modules backing the multi-source pipeline:
    - `src/sources/` — Source adapters (arxiv, huggingface, reddit, hackernews, github, semantic_scholar, openalex); all subclass `SourceAdapter` with built-in rate limiting, retry, and failure isolation
@@ -111,8 +129,8 @@ run_multi_source.py (social + academic sources)
 
 ## Implementation Status
 
-- **Production-ready:** arXiv fetch, HuggingFace fetch, Reddit/HN/GitHub/OpenAlex/Semantic Scholar adapters (`src/sources/`), multi-source pipeline (`run_multi_source.py`), LLM summary enrichment (`enrich_summaries.py`), deduplication/scoring, daily brief generation, topic validation, Obsidian integration
-- **Scaffold only (no logic):** topic mutation, weekly/monthly report synthesis (`build_periodic_report.py`), paper deep-dive
+- **Production-ready:** arXiv fetch, HuggingFace fetch, Reddit/HN/GitHub/OpenAlex/Semantic Scholar adapters (`src/sources/`), multi-source pipeline (`run_multi_source.py`), LLM summary enrichment (`enrich_summaries.py`), deduplication/scoring, daily brief generation, weekly/monthly report generation (`build_periodic_report.py`), topic validation, Obsidian integration
+- **Scaffold only (no logic):** topic mutation, paper deep-dive
 
 ## Key Config
 

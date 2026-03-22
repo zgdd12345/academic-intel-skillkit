@@ -308,6 +308,20 @@ def obsidian_daily_brief_path(config: dict[str, Any], target_date: str) -> Path 
     return root / "01_Daily" / f"{note_date}_Daily.md"
 
 
+def obsidian_weekly_path(config: dict[str, Any], week_id: str) -> Path | None:
+    root = obsidian_root(config)
+    if root is None:
+        return None
+    return root / "03_Weekly" / f"{week_id}-academic-weekly.md"
+
+
+def obsidian_monthly_path(config: dict[str, Any], month_id: str) -> Path | None:
+    root = obsidian_root(config)
+    if root is None:
+        return None
+    return root / "04_Monthly" / f"{month_id}-academic-monthly.md"
+
+
 class JsonLoadError(RuntimeError):
     pass
 

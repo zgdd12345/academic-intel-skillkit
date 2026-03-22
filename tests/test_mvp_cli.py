@@ -366,6 +366,35 @@ class MvpCliTests(unittest.TestCase):
         self.assertEqual(payload["items"], [])
         self.assertEqual(payload["mode"], "config")
 
+    def test_enrich_target_arxiv_dry_run(self) -> None:
+        config_path = self.write_config()
+        arxiv_path = self.write_arxiv_payload()
+        result = run_cli(
+            "scripts/enrich_summaries.py",
+            "--config", str(config_path),
+            "--arxiv", str(arxiv_path),
+            "--enrich-target", "arxiv",
+            "--dry-run",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("dry-run", result.stdout)
+
+    def test_enrich_target_huggingface_dry_run_skips_arxiv(self) -> None:
+        config_path = self.write_config()
+        arxiv_path = self.write_arxiv_payload()
+        hf_path = self.write_huggingface_payload()
+        result = run_cli(
+            "scripts/enrich_summaries.py",
+            "--config", str(config_path),
+            "--arxiv", str(arxiv_path),
+            "--huggingface", str(hf_path),
+            "--enrich-target", "huggingface",
+            "--dry-run",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # Should NOT contain arXiv shortlist output
+        self.assertNotIn("shortlist=", result.stdout)
+
     def test_generate_daily_brief_fails_on_invalid_required_arxiv_json(self) -> None:
         config_path = self.write_config()
         arxiv_path = self.write_invalid_json("broken-arxiv.json", "{invalid")
@@ -402,40 +431,44 @@ class ReviewRegressionTests(unittest.TestCase):
             Path("/tmp/ObsidianVault/Research_Intel/01_Daily/2026_03_13_Daily.md"),
         )
 
-    def test_run_daily_pipeline_sequences_commands_and_uses_obsidian_output(self) -> None:
+    def _make_pipeline_config(self, workdir: Path) -> Path:
+        config_path = workdir / "research-topics.local.yaml"
+        config_path.write_text(
+            textwrap.dedent(
+                """
+                obsidian:
+                  vault_path: "/tmp/ObsidianVault"
+                  root_dir: "Research_Intel"
+                reporting:
+                  daily_top_n: 5
+                  daily_detailed_top_n: 2
+                sources:
+                  arxiv:
+                    enabled: true
+                    lookback_days: 2
+                    max_results_per_topic: 10
+                    topic_ids: []
+                topics:
+                  - id: agents
+                    name: AI Agents
+                    enabled: true
+                    priority: high
+                    include_keywords:
+                      - agent
+                    exclude_keywords: []
+                    arxiv_categories:
+                      - cs.AI
+                """
+            ).strip()
+            + "\n",
+            encoding="utf-8",
+        )
+        return config_path
+
+    def test_run_daily_pipeline_serial_sequences_commands_and_uses_obsidian_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workdir = Path(temp_dir)
-            config_path = workdir / "research-topics.local.yaml"
-            config_path.write_text(
-                textwrap.dedent(
-                    """
-                    obsidian:
-                      vault_path: "/tmp/ObsidianVault"
-                      root_dir: "Research_Intel"
-                    reporting:
-                      daily_top_n: 5
-                      daily_detailed_top_n: 2
-                    sources:
-                      arxiv:
-                        enabled: true
-                        lookback_days: 2
-                        max_results_per_topic: 10
-                        topic_ids: []
-                    topics:
-                      - id: agents
-                        name: AI Agents
-                        enabled: true
-                        priority: high
-                        include_keywords:
-                          - agent
-                        exclude_keywords: []
-                        arxiv_categories:
-                          - cs.AI
-                    """
-                ).strip()
-                + "\n",
-                encoding="utf-8",
-            )
+            config_path = self._make_pipeline_config(workdir)
 
             completed = subprocess.CompletedProcess(args=[], returncode=0)
             with patch("run_daily_pipeline.subprocess.run", return_value=completed) as mock_run, patch(
@@ -448,11 +481,12 @@ class ReviewRegressionTests(unittest.TestCase):
                     "2026-03-13",
                     "--topic",
                     "agents",
+                    "--no-parallel",
                 ],
             ):
                 run_daily_pipeline.main()
 
-            # Pipeline now runs 4 steps: arXiv → HF → enrich → brief
+            # Serial pipeline runs 4 steps: arXiv → multi-source → enrich → brief
             self.assertEqual(mock_run.call_count, 4)
             arxiv_cmd = mock_run.call_args_list[0].args[0]
             hotspot_cmd = mock_run.call_args_list[1].args[0]
@@ -462,13 +496,93 @@ class ReviewRegressionTests(unittest.TestCase):
             self.assertIn("fetch_arxiv.py", arxiv_cmd[1])
             self.assertIn("--topic", arxiv_cmd)
             self.assertIn("agents", arxiv_cmd)
-            self.assertIn("fetch_huggingface.py", hotspot_cmd[1])
+            self.assertIn("run_multi_source.py", hotspot_cmd[1])
             self.assertIn("enrich_summaries.py", enrich_cmd[1])
             self.assertIn("generate_daily_brief.py", brief_cmd[1])
             self.assertIn(
                 "/tmp/ObsidianVault/Research_Intel/01_Daily/2026_03_13_Daily.md",
                 brief_cmd,
             )
+
+    def test_run_daily_pipeline_parallel_uses_popen_for_fetch_and_enrich(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workdir = Path(temp_dir)
+            config_path = self._make_pipeline_config(workdir)
+
+            completed = subprocess.CompletedProcess(args=[], returncode=0)
+            popen_calls: list[list[str]] = []
+
+            def fake_popen(cmd: list[str], **_kw: object) -> Mock:
+                popen_calls.append(cmd)
+                return Mock(wait=Mock(return_value=0), poll=Mock(return_value=0))
+
+            with patch("run_daily_pipeline.subprocess.Popen", side_effect=fake_popen), \
+                 patch("run_daily_pipeline.subprocess.run", return_value=completed) as mock_run, \
+                 patch(
+                     "run_daily_pipeline.sys.argv",
+                     [
+                         "run_daily_pipeline.py",
+                         "--config",
+                         str(config_path),
+                         "--date",
+                         "2026-03-13",
+                         "--topic",
+                         "agents",
+                     ],
+                 ):
+                run_daily_pipeline.main()
+
+            # Phase 1: 2 Popen calls (arXiv fetch + multi-source fetch)
+            # Phase 2: 2 Popen calls (arXiv enrich + HF enrich)
+            # Phase 3: 1 subprocess.run call (brief generation)
+            self.assertEqual(len(popen_calls), 4)
+            self.assertIn("fetch_arxiv.py", popen_calls[0][1])
+            self.assertIn("run_multi_source.py", popen_calls[1][1])
+            self.assertIn("enrich_summaries.py", popen_calls[2][1])
+            self.assertIn("--enrich-target", popen_calls[2])
+            self.assertIn("arxiv", popen_calls[2])
+            self.assertIn("enrich_summaries.py", popen_calls[3][1])
+            self.assertIn("--enrich-target", popen_calls[3])
+            self.assertIn("huggingface", popen_calls[3])
+
+            # brief via subprocess.run
+            self.assertEqual(mock_run.call_count, 1)
+            brief_cmd = mock_run.call_args_list[0].args[0]
+            self.assertIn("generate_daily_brief.py", brief_cmd[1])
+
+    def test_run_daily_pipeline_parallel_skip_hotspots_no_hf_enrich(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workdir = Path(temp_dir)
+            config_path = self._make_pipeline_config(workdir)
+
+            completed = subprocess.CompletedProcess(args=[], returncode=0)
+            popen_calls: list[list[str]] = []
+
+            def fake_popen(cmd: list[str], **_kw: object) -> Mock:
+                popen_calls.append(cmd)
+                return Mock(wait=Mock(return_value=0), poll=Mock(return_value=0))
+
+            with patch("run_daily_pipeline.subprocess.Popen", side_effect=fake_popen), \
+                 patch("run_daily_pipeline.subprocess.run", return_value=completed) as mock_run, \
+                 patch(
+                     "run_daily_pipeline.sys.argv",
+                     [
+                         "run_daily_pipeline.py",
+                         "--config",
+                         str(config_path),
+                         "--skip-hotspots",
+                     ],
+                 ):
+                run_daily_pipeline.main()
+
+            # --skip-hotspots: Phase 1 arXiv via run_step (subprocess.run),
+            # Phase 2 single arXiv enrich via run_parallel_steps (Popen),
+            # Phase 3 brief via run_step (subprocess.run)
+            self.assertEqual(len(popen_calls), 1)
+            self.assertIn("enrich_summaries.py", popen_calls[0][1])
+            self.assertEqual(mock_run.call_count, 2)
+            self.assertIn("fetch_arxiv.py", mock_run.call_args_list[0].args[0][1])
+            self.assertIn("generate_daily_brief.py", mock_run.call_args_list[1].args[0][1])
 
     def test_fetch_huggingface_daily_papers_uses_official_api(self) -> None:
         mock_response = Mock()

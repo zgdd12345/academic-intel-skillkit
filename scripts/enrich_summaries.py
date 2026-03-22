@@ -241,6 +241,12 @@ def main() -> None:
     ap.add_argument("--base-url", default="", help="OpenAI-compatible base URL（覆盖 LLM_BASE_URL）")
     ap.add_argument("--api-key", default="", help="API key（覆盖 LLM_API_KEY）")
     ap.add_argument("--dry-run", action="store_true", help="打印将翻译的摘要，不真正调用 API")
+    ap.add_argument(
+        "--enrich-target",
+        choices=["all", "arxiv", "huggingface"],
+        default="all",
+        help="翻译目标：all=全部（默认）, arxiv=仅arXiv摘要, huggingface=仅HF热点",
+    )
     args = ap.parse_args()
 
     config = _load_config(args.config)
@@ -277,49 +283,52 @@ def main() -> None:
     else:
         client = None
 
-    # Score candidates to find the shortlist
-    shortlisted_ids = _shortlisted_paper_ids(
-        args.arxiv, args.huggingface, config, top_n
-    )
-    if not shortlisted_ids:
-        print("警告：arXiv shortlist 为空（可能是周末无新论文），跳过 arXiv 翻译，继续处理热点数据。", file=sys.stderr)
+    target = args.enrich_target
 
-    print(f"LLM 摘要翻译：top_n={top_n}, model={model}, shortlist={len(shortlisted_ids)} 篇")
+    # --- Phase: arXiv enrichment ---
+    if target in ("all", "arxiv"):
+        shortlisted_ids = _shortlisted_paper_ids(
+            args.arxiv, args.huggingface, config, top_n
+        )
+        if not shortlisted_ids:
+            print("警告：arXiv shortlist 为空（可能是周末无新论文），跳过 arXiv 翻译，继续处理热点数据。", file=sys.stderr)
 
-    # Load raw JSON items (we mutate dicts in-place to preserve all original fields)
-    payload, items = _load_raw_items(args.arxiv)
+        print(f"LLM 摘要翻译：top_n={top_n}, model={model}, shortlist={len(shortlisted_ids)} 篇")
 
-    count = _enrich_items(items, shortlisted_ids, client, model, dry_run=args.dry_run)
+        payload, items = _load_raw_items(args.arxiv)
+        count = _enrich_items(items, shortlisted_ids, client, model, dry_run=args.dry_run)
 
-    if args.dry_run:
-        print(f"[dry-run] 共 {count} 篇待翻译（未调用 API）。")
-        sys.exit(0)
+        if args.dry_run:
+            print(f"[dry-run] 共 {count} 篇待翻译（未调用 API）。")
+            if target == "arxiv":
+                sys.exit(0)
+        else:
+            dump_json(out_path, payload)
+            print(f"完成：翻译 arXiv {count} 篇，已写入 {out_path}")
 
-    # Write back arxiv
-    dump_json(out_path, payload)
-    print(f"完成：翻译 arXiv {count} 篇，已写入 {out_path}")
+    # --- Phase: HF hotspot enrichment ---
+    if target in ("all", "huggingface"):
+        if args.huggingface and Path(args.huggingface).exists():
+            hf_payload, hf_items = _load_raw_items(args.huggingface)
+            all_hf_ids = {
+                (
+                    item.get("paper_id") or item.get("paperId") or item.get("id")
+                    or item.get("external_id")
+                    or next(iter(item.get("paper_ids") or []), None)
+                    or ""
+                ).strip()
+                for item in hf_items
+            } - {""}
+            if all_hf_ids:
+                print(f"LLM 翻译 HF 热点摘要：{len(all_hf_ids)} 篇")
+                hf_count = _enrich_items(hf_items, all_hf_ids, client, model, dry_run=args.dry_run)
+                print(f"完成：翻译 HF 热点摘要 {hf_count} 篇")
 
-    # Also enrich HF hotspot items (all of them, since count is small)
-    if args.huggingface and Path(args.huggingface).exists():
-        hf_payload, hf_items = _load_raw_items(args.huggingface)
-        all_hf_ids = {
-            (
-                item.get("paper_id") or item.get("paperId") or item.get("id")
-                or item.get("external_id")
-                or next(iter(item.get("paper_ids") or []), None)
-                or ""
-            ).strip()
-            for item in hf_items
-        } - {""}
-        if all_hf_ids:
-            print(f"LLM 翻译 HF 热点摘要：{len(all_hf_ids)} 篇")
-            hf_count = _enrich_items(hf_items, all_hf_ids, client, model, dry_run=False)
-            print(f"完成：翻译 HF 热点摘要 {hf_count} 篇")
-
-        print(f"LLM 翻译 HF 热点标题：{len(hf_items)} 条")
-        title_count = _enrich_titles(hf_items, client, model, dry_run=False)
-        dump_json(args.huggingface, hf_payload)
-        print(f"完成：翻译标题 {title_count} 条，已写入 {args.huggingface}")
+            if not args.dry_run:
+                print(f"LLM 翻译 HF 热点标题：{len(hf_items)} 条")
+                title_count = _enrich_titles(hf_items, client, model, dry_run=False)
+                dump_json(args.huggingface, hf_payload)
+                print(f"完成：翻译标题 {title_count} 条，已写入 {args.huggingface}")
 
 
 if __name__ == "__main__":
