@@ -75,6 +75,21 @@ def format_topics(item_topic_ids: list[str], topic_names: dict[str, str]) -> str
     return ", ".join(topic_names.get(topic_id, topic_id) for topic_id in item_topic_ids[:3])
 
 
+_SOURCE_SHORT = {
+    "hackernews": "HN",
+    "reddit": "reddit",
+    "github": "GitHub",
+    "huggingface": "HF",
+    "arxiv": "arXiv",
+    "semantic_scholar": "S2",
+    "openalex": "OpenAlex",
+}
+
+
+def _source_short(source: str) -> str:
+    return _SOURCE_SHORT.get(source.lower(), source)
+
+
 def format_link(title: str, url: str) -> str:
     clean_title = title or "未命名论文"
     if url:
@@ -148,7 +163,7 @@ def topic_phrase(item: Any, topic_names: dict[str, str]) -> str:
 
 def build_report_summary(item: Any, topic_names: dict[str, str]) -> str:
     if item.summary_zh:
-        return f"中文摘要：{_strip_tags(item.summary_zh.strip())}"
+        return _strip_tags(item.summary_zh.strip())
     sentences = [
         f"{topic_phrase(item, topic_names)}，{relative_freshness(item.published_at)}，{signal_phrase(item.score)}。"
     ]
@@ -212,18 +227,10 @@ def format_latest_work(
     if brief_items:
         brief_lines: list[str] = []
         for item in brief_items:
-            topic_label = format_topics(topic_ids_for_item(item), topic_names)
             link = format_link(item.title or "未命名论文", item.url)
             paper_id = item.paper_id or ""
-            if item.summary_zh:
-                desc = item.summary_zh.strip()
-            else:
-                desc = f"{topic_phrase(item, topic_names)}，{signal_phrase(item.score)}。"
             id_prefix = f"`{paper_id}` " if paper_id else ""
-            brief_lines.append(
-                f"- {id_prefix}**{link}** · {topic_label} · {format_date(item.published_at)} · {item.score:.1f}分"
-            )
-            brief_lines.append(f"  {desc}")
+            brief_lines.append(f"- {id_prefix}{link}")
         parts.append("\n".join(brief_lines))
 
     return "\n\n".join(parts)
@@ -296,10 +303,12 @@ def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) ->
     if not items:
         return "_暂无社区热点数据；这不会影响当前 arXiv 主链路日报生成。_"
 
-    # Group by source/platform
+    # Group by source/platform; arXiv items belong to 最新工作 only
     groups: dict[str, list[dict[str, Any]]] = {}
     for item in items:
         source = str(item.get("source") or item.get("platform") or "其他").strip()
+        if source.lower() == "arxiv":
+            continue
         if source not in groups:
             groups[source] = []
         groups[source].append(item)
@@ -308,9 +317,11 @@ def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) ->
     for source, group_items in groups.items():
         section_parts: list[str] = [f"### {source}"]
 
-        # First 3: full callout blocks
-        for item in group_items[:3]:
+        # Top 1: full callout block (most important)
+        for item in group_items[:1]:
             title = str(item.get("title") or item.get("name") or "未命名热点").strip()
+            title_zh = _strip_tags(str(item.get("title_zh") or "").strip())
+            display_title = title_zh if title_zh else title
             url = str(item.get("url") or item.get("link") or "").strip()
 
             meta_parts: list[str] = []
@@ -333,33 +344,28 @@ def format_hotspots(items: list[dict[str, Any]], topic_names: dict[str, str]) ->
             summary_zh = _strip_tags(str(item.get("summary_zh") or item.get("summaryZh") or "").strip())
             ai_summary = _strip_tags(str(_hfield(item, "ai_summary") or "").strip())
             if summary_zh:
-                intro = f"中文摘要：{summary_zh}"
-            elif ai_summary:
-                intro = f"工作简介：{truncate_report_text(ai_summary, word_limit=40, char_limit=120)}"
+                intro = truncate_report_text(summary_zh, word_limit=60, char_limit=150)
+            elif ai_summary and re.search(r"[\u3400-\u9fff]", ai_summary):
+                intro = truncate_report_text(ai_summary, word_limit=60, char_limit=150)
             else:
                 _, note = build_hotspot_note(item, topic_names)
-                intro = f"提示：{note}"
+                intro = note
 
-            block_lines = [f"> [!tip] {format_link(title, url)}"]
+            block_lines = [f"> [!tip] {format_link(display_title, url)}"]
             if meta_parts:
                 block_lines.append(f"> {' | '.join(meta_parts)}")
             block_lines.append(">")
             block_lines.append(f"> {intro}")
             section_parts.append("\n".join(block_lines))
 
-        # Remaining: news-headline one-liners
-        for item in group_items[3:]:
+        # Items 2–3: news-headline one-liners (secondary)
+        for item in group_items[1:3]:
             title = str(item.get("title") or item.get("name") or "未命名热点").strip()
+            title_zh = _strip_tags(str(item.get("title_zh") or "").strip())
             url = str(item.get("url") or item.get("link") or "").strip()
-            summary_zh = _strip_tags(str(item.get("summary_zh") or item.get("summaryZh") or "").strip())
-            ai_summary = _strip_tags(str(item.get("ai_summary") or "").strip())
-            if summary_zh:
-                one_liner = truncate_report_text(summary_zh, word_limit=20, char_limit=50)
-            elif ai_summary:
-                one_liner = truncate_report_text(ai_summary, word_limit=20, char_limit=50)
-            else:
-                one_liner = str(item.get("source") or item.get("platform") or "社区").strip() + " 上引发讨论"
-            section_parts.append(f"- **{format_link(title, url)}** — {one_liner}")
+            src_short = _source_short(source)
+            display_title = title_zh if title_zh else title
+            section_parts.append(f"- [{src_short}]({url}) {display_title}")
 
         sections.append("\n\n".join(section_parts))
 
@@ -397,10 +403,10 @@ def build_overview(
     if lead_item.summary_zh:
         lead_desc = lead_item.summary_zh.strip()
         first_period = lead_desc.find("。")
-        if 0 < first_period < 80:
+        if 0 < first_period < 150:
             lead_desc = lead_desc[:first_period + 1]
-        elif len(lead_desc) > 80:
-            lead_desc = lead_desc[:80] + "…"
+        elif len(lead_desc) > 150:
+            lead_desc = lead_desc[:150] + "…"
     else:
         lead_desc = f"{topic_phrase(lead_item, topic_names)}，{signal_phrase(lead_item.score)}。"
 

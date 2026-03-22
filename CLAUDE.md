@@ -24,6 +24,8 @@ pip install -r requirements.txt
 mkdir -p output
 cp config/research-topics.example.yaml config/research-topics.local.yaml
 # Edit config/research-topics.local.yaml with your topics and vault path
+cp configs/sources.example.yaml configs/sources.local.yaml
+# Edit configs/sources.local.yaml to enable/configure social sources
 ```
 
 ## Common Commands
@@ -34,8 +36,20 @@ python3 scripts/manage_topics.py --validate
 python3 scripts/manage_topics.py --list
 python3 scripts/manage_topics.py --query-plan
 
-# Full daily pipeline (recommended)
+# Full daily pipeline — arXiv + HuggingFace only (stable)
 python3 scripts/run_daily_pipeline.py
+
+# Multi-source pipeline — adds Reddit, HN, GitHub, S2, OpenAlex
+python3 scripts/run_multi_source.py \
+  --sources-config configs/sources.local.yaml \
+  --out output/multi-source.json
+# Output feeds into generate_daily_brief.py via --huggingface
+
+# Enrich top-N abstracts with LLM Chinese translation
+python3 scripts/enrich_summaries.py \
+  --arxiv output/arxiv.json \
+  --top-n 8
+# Requires LLM_BASE_URL / LLM_API_KEY / LLM_MODEL env vars (or llm: block in YAML config)
 
 # Individual steps
 python3 scripts/fetch_arxiv.py
@@ -51,7 +65,7 @@ conda run -n crawer python -m pytest tests/test_mvp_cli.py
 
 ## Architecture
 
-**Three-layer design:**
+**Four-layer design:**
 
 1. **Skill Layer** (`skills/`) — Pure Markdown agent execution contracts. `*.SKILL.md` files define what each skill does, its inputs/outputs, and how to invoke the underlying scripts. These are read by AI agents, not executed directly.
 
@@ -60,17 +74,35 @@ conda run -n crawer python -m pytest tests/test_mvp_cli.py
    - `fetch_arxiv.py` — arXiv Atom feed via feedparser → `output/arxiv.json`
    - `fetch_huggingface.py` — HF `daily_papers` API → `output/huggingface.json`
    - `generate_daily_brief.py` — Merges/deduplicates/scores candidates → Markdown report
-   - `run_daily_pipeline.py` — Orchestrates the full chain; suitable for cron/OpenClaw
+   - `run_daily_pipeline.py` — Orchestrates arXiv + HF chain; suitable for cron/OpenClaw
+   - `run_multi_source.py` — Multi-source pipeline (Reddit, HN, GitHub, S2, OpenAlex); output feeds into `generate_daily_brief.py`
+   - `enrich_summaries.py` — LLM-translates top-N English abstracts → `summary_zh` via OpenAI-compatible API
    - `manage_topics.py` — Read-only topic inspection (no mutation)
+   - `build_periodic_report.py` — Scaffold placeholder for weekly/monthly reports (no real logic yet)
 
-3. **Template & Config Layer** — YAML configs + Markdown templates. `config/research-topics.local.yaml` is the runtime config (gitignored). `templates/daily-brief-template.md` is the canonical output template.
+3. **Library Layer** (`src/`) — Reusable Python modules backing the multi-source pipeline:
+   - `src/sources/` — Source adapters (arxiv, huggingface, reddit, hackernews, github, semantic_scholar, openalex); all subclass `SourceAdapter` with built-in rate limiting, retry, and failure isolation
+   - `src/normalize/` — `NormalizedItem` schema + `EntityResolver` for cross-source deduplication
+   - `src/scoring/` — `hot_score` ranking function
+   - `src/storage/` — `DiskCache` for adapter-level HTTP response caching
+   - `src/pipelines/collect.py` — `CollectPipeline`: orchestrates adapters → entity resolution → scoring → ranked `NormalizedItem` list
+
+4. **Template & Config Layer** — YAML configs + Markdown templates:
+   - `config/research-topics.local.yaml` — runtime topic config (gitignored)
+   - `configs/sources.local.yaml` — per-source enable/rate-limit/credential config (copy from `configs/sources.example.yaml`)
+   - `templates/daily-brief-template.md` — canonical output template
 
 **Data flow:**
 ```
-run_daily_pipeline.py
+run_daily_pipeline.py (arXiv + HF only)
   ├─ fetch_arxiv.py         → output/arxiv.json
   ├─ fetch_huggingface.py   → output/huggingface.json
   └─ generate_daily_brief.py → output/daily-brief.md (or Obsidian vault)
+
+run_multi_source.py (social + academic sources)
+  └─ CollectPipeline
+       ├─ RedditAdapter / HNAdapter / GitHubAdapter / S2Adapter / OpenAlexAdapter
+       └─ → output/multi-source.json → generate_daily_brief.py --huggingface
 ```
 
 **arXiv query building:** Combines `include_keywords`, `exclude_keywords`, and `arxiv_categories` per topic (up to 6 keywords each). Example: `(all:agent OR all:planning) AND cat:cs.AI ANDNOT (all:game)`.
@@ -79,8 +111,8 @@ run_daily_pipeline.py
 
 ## Implementation Status
 
-- **Production-ready:** arXiv fetch, HuggingFace fetch, deduplication/scoring, daily brief generation, topic validation, Obsidian integration
-- **Scaffold only (no logic):** Semantic Scholar, topic mutation, weekly/monthly reports, paper deep-dive
+- **Production-ready:** arXiv fetch, HuggingFace fetch, Reddit/HN/GitHub/OpenAlex/Semantic Scholar adapters (`src/sources/`), multi-source pipeline (`run_multi_source.py`), LLM summary enrichment (`enrich_summaries.py`), deduplication/scoring, daily brief generation, topic validation, Obsidian integration
+- **Scaffold only (no logic):** topic mutation, weekly/monthly report synthesis (`build_periodic_report.py`), paper deep-dive
 
 ## Key Config
 
@@ -89,5 +121,10 @@ run_daily_pipeline.py
 - `reporting.daily_top_n` — Number of recommendations in brief
 - `sources.arxiv.lookback_days` — Days to look back
 - `topics[]` — List of topics with `include_keywords`, `exclude_keywords`, `arxiv_categories`
+- `llm.base_url` / `llm.api_key` / `llm.model` — Optional; used by `enrich_summaries.py` (can also use env vars `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`)
+
+`configs/sources.local.yaml` (gitignored, must be created from `configs/sources.example.yaml`):
+- Per-source `enabled`, `requests_per_minute`, `max_retries`, and source-specific keys
+- Sources: `huggingface`, `reddit`, `hackernews`, `github`, `semantic_scholar`, `openalex`
 
 Default output paths are resolved relative to the repo root (hardcoded in `common.py`).

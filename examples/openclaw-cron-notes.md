@@ -8,6 +8,7 @@ These notes are written with OpenClaw in mind, but the same structure can be ada
 
 - Schedule: every day at 09:00 local time
 - Command flow: `scripts/run_daily_pipeline.py`
+- Full chain: arXiv fetch → multi-source hotspots (Reddit, HN, GitHub, S2, OpenAlex) → LLM abstract enrichment → daily brief generation
 - Output: one Chinese daily note in `Research_Intel/01_Daily/` when `config/research-topics.local.yaml` contains a valid `obsidian.vault_path` and `obsidian.root_dir`
 
 With the current canonical CLI defaults, OpenClaw only needs to schedule one command:
@@ -19,7 +20,8 @@ python3 scripts/run_daily_pipeline.py
 What that wrapper does today:
 
 - fetches arXiv candidates
-- optionally fetches Hugging Face Papers hotspots
+- collects multi-source hotspots (Reddit, HN, GitHub, HuggingFace, Semantic Scholar, OpenAlex) via `run_multi_source.py`
+- enriches top-N abstracts with LLM Chinese translation via `enrich_summaries.py`
 - generates the daily brief
 - writes the final note into Obsidian if the config includes a valid vault path
 
@@ -31,13 +33,13 @@ Recommended OpenClaw job shape:
 - command:
 
 ```bash
-conda run -n news python scripts/run_daily_pipeline.py
+conda run -n crawer python scripts/run_daily_pipeline.py
 ```
 
 If you want to limit the daily run to selected topics:
 
 ```bash
-conda run -n news python scripts/run_daily_pipeline.py --topic agents --topic multimodal
+conda run -n crawer python scripts/run_daily_pipeline.py --topic agents --topic multimodal
 ```
 
 ## Scaffold-only ideas

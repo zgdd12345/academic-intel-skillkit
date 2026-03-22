@@ -25,11 +25,17 @@
   - 面向生成链路的输出模板契约
 - `examples/openclaw-cron-notes.md`
   - 面向 OpenClaw 定时调度与部署的入口说明
+- `examples/launchd-setup.md`
+  - 面向 macOS 本地定时部署（launchd/crontab）的配置指南
+- `examples/skill-installation.md`
+  - 面向各 AI agent 平台（Claude Code、Codex、OpenCode）的 skill 挂载说明
 
 阅读建议：
 
 - 人类初次了解项目时，先读 `README.md`
 - 人类准备部署到 Obsidian / OpenClaw 时，再读 `examples/obsidian-layout.md` 与 `examples/openclaw-cron-notes.md`
+- 人类准备在本机设置定时任务时，读 `examples/launchd-setup.md`
+- 人类或 agent 需要在特定平台挂载 skills 时，读 `examples/skill-installation.md`
 - AI agent 执行任务时，优先读取相关 `SKILL.md`、目标脚本和本地配置
 
 ## 中文版
@@ -44,24 +50,27 @@
 
 ### 当前状态
 
-#### 已实现的 MVP
+#### 已实现
 
 - `scripts/fetch_arxiv.py` 会根据配置中的 topic 抓取 arXiv 论文
 - `scripts/fetch_huggingface.py` 会调用 Hugging Face Papers 官方热点接口，并按本地 topic 做可选过滤
+- `scripts/run_multi_source.py` 多源采集管线，支持 Reddit、Hacker News、GitHub、Semantic Scholar、OpenAlex（通过 `src/sources/` 适配器）
+- `scripts/enrich_summaries.py` 通过 OpenAI 兼容 API 将 top-N 英文摘要翻译为中文
 - `scripts/generate_daily_brief.py` 会合并候选 JSON、去重、排序，并生成一份中文 Markdown 日报，同时保留论文元数据原文
-- `scripts/run_daily_pipeline.py` 会把 arXiv 抓取、可选热点抓取与日报生成串成一条可被 OpenClaw/cron 直接调度的单命令链路
+- `scripts/run_daily_pipeline.py` 会把 arXiv 抓取、多源热点采集、LLM 摘要翻译与日报生成串成一条可被 OpenClaw/cron 直接调度的单命令链路
+- `src/sources/` 7 个信息源适配器，内置限流、重试和故障隔离
+- `src/normalize/` 跨源实体解析与去重
+- `src/scoring/` 多维 hot_score 排序
+- `src/storage/` 磁盘缓存
 - topic 匹配、基础打分、以 arXiv 为核心的日报生成链路已经可用
-- 日报目前包含中文概览、主题快照、建议动作以及明确的数据边界说明
-- 当前标准 CLI 路径默认使用 `config/research-topics.local.yaml`、`output/arxiv.json` 和 `output/daily-brief.md`
+- 日报目前包含中文概览、主题快照、社区热点、建议动作以及明确的数据边界说明
 - `scripts/manage_topics.py` 支持列出、查看、校验，并预览实际生效的 arXiv 查询计划，不会修改配置
-- 如果你在仓库外部已经拿到了其他来源的规范化 JSON，日报生成器也可以选择性合并
 
 #### 当前仅脚手架
 
-- `scripts/fetch_semantic_scholar.py`
-- `scripts/build_periodic_report.py`
+- `scripts/build_periodic_report.py`（周期报告生成占位）
 - `scripts/manage_topics.py` 中超出只读查看、校验、查询预览之外的部分
-- `skills/` 目录中的深度研读编排和周期性复盘自动化
+- `skills/` 目录中的深度研读编排（`paper-deep-dive`）和周期性复盘自动化（`research-weekly-review`、`research-monthly-review`）
 
 如果你是第一次评估这个仓库，请把下面的“arXiv 主链路 + 可选热点补充”视为当前标准路径。
 
@@ -164,10 +173,12 @@ python3 scripts/generate_daily_brief.py \
 ### 仓库结构
 
 - `skills/`：面向宿主的 skill 文档；其中 `research-daily-brief` 和 `research-topic-manager` 的只读部分，今天可以直接映射到仓库内已实现的自动化
-- `scripts/`：确定性的 CLI 层；当前 MVP 主要是 arXiv 抓取与日报生成
+- `scripts/`：确定性的 CLI 层；arXiv 抓取、多源采集、LLM 摘要翻译与日报生成
+- `src/`：可复用 Python 模块层；信息源适配器、归一化、打分、缓存和采集管线
 - `config/`：`config/research-topics.local.yaml` 的标准起始配置，以及一些面向未来工作的示例配置
+- `configs/`：多信息源配置；`configs/sources.local.yaml` 控制各源的启用/限流/凭证
 - `templates/`：标准日报模板，以及面向未来流程的脚手架模板
-- `examples/`：可选的宿主布局与调度说明，不是 MVP 的必需部分
+- `examples/`：宿主布局、定时调度、skill 挂载说明
 
 ### 内置 Skills
 
@@ -187,7 +198,7 @@ python3 scripts/generate_daily_brief.py \
 
 - `fetch_arxiv.py` 需要访问 arXiv API 的网络权限。
 - `fetch_huggingface.py` 需要访问 Hugging Face 官方 `daily_papers` API 的网络权限。
-- `run_daily_pipeline.py` 是当前最适合 OpenClaw 定时调用的入口；热点抓取失败时会降级为只生成 arXiv 主链路日报。
+- `run_daily_pipeline.py` 是当前最适合 OpenClaw/cron/launchd 定时调用的入口；多源采集或 LLM 翻译失败时会降级为只生成 arXiv 主链路日报。
 - 文档约定：
   - `README.md`、`CONTRIBUTING.md`、`examples/obsidian-layout.md`、`NEXT_PHASE_PLAN.md` 主要服务人类阅读。
   - `skills/*.SKILL.md`、`scripts/*.py`、`config/research-topics.local.yaml`、`templates/*.md`、`examples/openclaw-cron-notes.md` 主要服务 AI agent 执行与部署。
@@ -237,11 +248,17 @@ MIT
   - output template contract for generation flows
 - `examples/openclaw-cron-notes.md`
   - OpenClaw scheduling and deployment notes
+- `examples/launchd-setup.md`
+  - macOS scheduled deployment guide (launchd/crontab)
+- `examples/skill-installation.md`
+  - skill mounting instructions for Claude Code, Codex, OpenCode
 
 Recommended reading order:
 
 - humans should start with `README.md`
 - humans preparing deployment should then read `examples/obsidian-layout.md` and `examples/openclaw-cron-notes.md`
+- humans setting up local scheduled runs should read `examples/launchd-setup.md`
+- humans or agents mounting skills on a specific platform should read `examples/skill-installation.md`
 - AI agents should read the relevant `SKILL.md`, target scripts, and local config before execution
 
 Open-source research-intelligence skill library with a small implemented MVP and clearly labeled scaffolds for future expansion.
@@ -254,24 +271,27 @@ The repository is designed to stay portable across OpenClaw, Claude Code, Codex,
 
 ### Current Status
 
-#### Implemented MVP
+#### Implemented
 
 - `scripts/fetch_arxiv.py` fetches arXiv papers from config-defined topics
 - `scripts/fetch_huggingface.py` calls the official Hugging Face Papers hotspot API and can optionally filter results with local topics
+- `scripts/run_multi_source.py` multi-source collection pipeline for Reddit, Hacker News, GitHub, Semantic Scholar, OpenAlex (via `src/sources/` adapters)
+- `scripts/enrich_summaries.py` translates top-N English abstracts to Chinese via OpenAI-compatible API
 - `scripts/generate_daily_brief.py` merges candidate JSON, deduplicates papers, ranks them, and renders one Chinese Markdown daily brief while keeping paper metadata in the original language
-- `scripts/run_daily_pipeline.py` chains arXiv fetch, optional hotspot fetch, and brief generation into one command suitable for OpenClaw/cron scheduling
-- topic matching, simple scoring, and arXiv-first daily brief generation are working today
-- the daily brief now includes a Chinese overview, topic snapshot, suggested actions, and explicit data-boundary notes
-- the canonical CLI path now defaults to `config/research-topics.local.yaml`, `output/arxiv.json`, and `output/daily-brief.md`
+- `scripts/run_daily_pipeline.py` chains arXiv fetch, multi-source hotspot collection, LLM summary enrichment, and brief generation into one command suitable for OpenClaw/cron scheduling
+- `src/sources/` 7 source adapters with built-in rate limiting, retry, and failure isolation
+- `src/normalize/` cross-source entity resolution and deduplication
+- `src/scoring/` multi-dimensional hot_score ranking
+- `src/storage/` disk cache for adapter-level HTTP response caching
+- topic matching, scoring, and arXiv-first daily brief generation are working today
+- the daily brief includes a Chinese overview, topic snapshot, community hotspots, suggested actions, and explicit data-boundary notes
 - `scripts/manage_topics.py` can list, inspect, validate, and preview the effective arXiv query plan without mutating configs
-- the brief generator can optionally merge pre-normalized JSON from other sources if you collected it outside this repo
 
 #### Scaffold-Only Today
 
-- `scripts/fetch_semantic_scholar.py`
-- `scripts/build_periodic_report.py`
+- `scripts/build_periodic_report.py` (periodic report generation placeholder)
 - `scripts/manage_topics.py` beyond read-only inspection, validation, and query-plan preview
-- deep-dive orchestration and periodic review automation in `skills/`
+- deep-dive orchestration (`paper-deep-dive`) and periodic review automation (`research-weekly-review`, `research-monthly-review`) in `skills/`
 
 If you are evaluating the repo for first-time use, treat the flow below as the canonical path: arXiv as the primary chain, with hotspots as an optional supplement.
 
@@ -374,10 +394,12 @@ python3 scripts/generate_daily_brief.py \
 ### Repository Layout
 
 - `skills/`: host-facing skill docs; `research-daily-brief` plus the read-only parts of `research-topic-manager` map directly to implemented repo automation today
-- `scripts/`: deterministic CLI layer; arXiv fetch plus daily brief generation are the current MVP
+- `scripts/`: deterministic CLI layer; arXiv fetch, multi-source collection, LLM summary enrichment, and daily brief generation
+- `src/`: reusable Python modules; source adapters, normalization, scoring, caching, and collection pipeline
 - `config/`: one canonical starter config for `config/research-topics.local.yaml` plus scaffold-only examples for future work
+- `configs/`: multi-source config; `configs/sources.local.yaml` controls per-source enable/rate-limit/credentials
 - `templates/`: one canonical daily brief template plus scaffold-only templates for future workflows
-- `examples/`: optional host-layout and scheduling notes, not required for the MVP
+- `examples/`: host layout, scheduling, and skill installation guides
 
 ### Included Skills
 
@@ -397,7 +419,7 @@ python3 scripts/generate_daily_brief.py \
 
 - `fetch_arxiv.py` requires network access to the arXiv API.
 - `fetch_huggingface.py` requires network access to the official Hugging Face `daily_papers` API.
-- `run_daily_pipeline.py` is the preferred OpenClaw scheduling entrypoint; if hotspot collection fails, it degrades to an arXiv-only brief instead of skipping the whole daily run.
+- `run_daily_pipeline.py` is the preferred OpenClaw/cron/launchd scheduling entrypoint; if multi-source collection or LLM enrichment fails, it degrades to an arXiv-only brief instead of skipping the whole daily run.
 - Documentation contract:
   - `README.md`, `CONTRIBUTING.md`, `examples/obsidian-layout.md`, and `NEXT_PHASE_PLAN.md` are primarily for human readers.
   - `skills/*.SKILL.md`, `scripts/*.py`, `config/research-topics.local.yaml`, `templates/*.md`, and `examples/openclaw-cron-notes.md` are primarily for AI-agent execution and deployment.

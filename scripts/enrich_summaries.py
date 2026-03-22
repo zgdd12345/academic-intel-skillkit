@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,8 +36,13 @@ from common import (
 )
 
 TRANSLATE_PROMPT = (
-    "你是学术论文摘要翻译专家。请将以下arXiv论文英文摘要翻译为简洁准确的中文"
-    "（100字以内），保留关键技术术语：\n\n{summary}\n\n只输出中文翻译，不要任何其他内容。"
+    "你是技术内容翻译专家。请将以下英文内容完整翻译为中文，"
+    "忠实于原文，保留关键技术术语，不要省略任何内容，将全文合并为一段连续的中文段落，不要分段：\n\n{summary}\n\n只输出中文翻译，不要任何其他内容。"
+)
+
+TITLE_PROMPT = (
+    "请将以下英文标题翻译为简洁的中文新闻标题，保留专有名词和产品名称，不要多余解释："
+    "\n\n{title}\n\n只输出中文标题，不要任何其他内容。"
 )
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -115,7 +121,7 @@ def _call_llm(client: Any, model: str, summary: str) -> str:
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": TRANSLATE_PROMPT.format(summary=summary)}],
-        max_tokens=300,
+        max_tokens=800,
         temperature=0.3,
     )
     return response.choices[0].message.content.strip()
@@ -138,7 +144,8 @@ def _enrich_items(
             or ""
         )
         summary = (
-            item.get("summary") or item.get("abstract") or item.get("content") or ""
+            item.get("summary") or item.get("abstract") or item.get("content")
+            or item.get("ai_summary") or ""
         ).strip()
         summary_zh = (item.get("summary_zh") or item.get("summaryZh") or "").strip()
 
@@ -162,6 +169,42 @@ def _enrich_items(
             print(f"  ✓ {paper_id}: {result[:60]}{'...' if len(result) > 60 else ''}")
         except Exception as exc:  # noqa: BLE001
             print(f"警告：paper_id={paper_id!r} 翻译失败：{exc}", file=sys.stderr)
+
+    return enriched
+
+
+def _enrich_titles(
+    items: list[dict[str, Any]],
+    client: Any,
+    model: str,
+    dry_run: bool,
+) -> int:
+    """Translate English titles → title_zh for hotspot items. Returns count enriched."""
+    enriched = 0
+    for item in items:
+        title = str(item.get("title") or item.get("name") or "").strip()
+        title_zh = str(item.get("title_zh") or "").strip()
+        if not title or title_zh:
+            continue
+        if re.search(r"[\u3400-\u9fff]", title):
+            continue  # already Chinese
+
+        if dry_run:
+            print(f"[dry-run] Would translate title: {title[:80]}")
+            enriched += 1
+            continue
+
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": TITLE_PROMPT.format(title=title)}],
+                max_tokens=80,
+                temperature=0.3,
+            )
+            item["title_zh"] = response.choices[0].message.content.strip()
+            enriched += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"警告：标题翻译失败 {title[:40]!r}：{exc}", file=sys.stderr)
 
     return enriched
 
@@ -239,8 +282,7 @@ def main() -> None:
         args.arxiv, args.huggingface, config, top_n
     )
     if not shortlisted_ids:
-        print("警告：shortlist 为空，没有可翻译的候选论文。", file=sys.stderr)
-        sys.exit(0)
+        print("警告：arXiv shortlist 为空（可能是周末无新论文），跳过 arXiv 翻译，继续处理热点数据。", file=sys.stderr)
 
     print(f"LLM 摘要翻译：top_n={top_n}, model={model}, shortlist={len(shortlisted_ids)} 篇")
 
@@ -270,10 +312,14 @@ def main() -> None:
             for item in hf_items
         } - {""}
         if all_hf_ids:
-            print(f"LLM 翻译 HF 热点：{len(all_hf_ids)} 篇")
+            print(f"LLM 翻译 HF 热点摘要：{len(all_hf_ids)} 篇")
             hf_count = _enrich_items(hf_items, all_hf_ids, client, model, dry_run=False)
-            dump_json(args.huggingface, hf_payload)
-            print(f"完成：翻译 HF 热点 {hf_count} 篇，已写入 {args.huggingface}")
+            print(f"完成：翻译 HF 热点摘要 {hf_count} 篇")
+
+        print(f"LLM 翻译 HF 热点标题：{len(hf_items)} 条")
+        title_count = _enrich_titles(hf_items, client, model, dry_run=False)
+        dump_json(args.huggingface, hf_payload)
+        print(f"完成：翻译标题 {title_count} 条，已写入 {args.huggingface}")
 
 
 if __name__ == "__main__":
