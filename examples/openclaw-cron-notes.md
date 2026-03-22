@@ -9,7 +9,9 @@ These notes are written with OpenClaw in mind, but the same structure can be ada
 - Schedule: every day at 09:00 local time
 - Command flow: `scripts/run_daily_pipeline.py`
 - Full chain: arXiv fetch → multi-source hotspots (Reddit, HN, GitHub, S2, OpenAlex) → LLM abstract enrichment → daily brief generation
-- Output: one Chinese daily note in `Research_Intel/01_Daily/` when `config/research-topics.local.yaml` contains a valid `obsidian.vault_path` and `obsidian.root_dir`
+- Output: one Chinese daily note in `Research_Intel/01_Daily/<YYYY-MM>/` when `config/research-topics.local.yaml` contains a valid `obsidian.vault_path` and `obsidian.root_dir`
+- On Sundays, also generates a weekly report to `03_Weekly/YYYY-MM-WNN-academic-weekly.md`
+- On the last day of each month, also generates a monthly report to `04_Monthly/YYYY-MM-academic-monthly.md`
 
 With the current canonical CLI defaults, OpenClaw only needs to schedule one command:
 
@@ -24,6 +26,8 @@ What that wrapper does today:
 - enriches top-N abstracts with LLM Chinese translation via `enrich_summaries.py`
 - generates the daily brief
 - writes the final note into Obsidian if the config includes a valid vault path
+- on Sundays, auto-triggers weekly report generation
+- on the last day of the month, auto-triggers monthly report generation
 
 Recommended OpenClaw job shape:
 
@@ -42,8 +46,21 @@ If you want to limit the daily run to selected topics:
 conda run -n crawer python scripts/run_daily_pipeline.py --topic agents --topic multimodal
 ```
 
+## Additional options
+
+Weekly and monthly reports are auto-triggered by the daily pipeline. To skip them:
+
+```bash
+conda run -n crawer python scripts/run_daily_pipeline.py --skip-periodic
+```
+
+To run weekly or monthly reports standalone:
+
+```bash
+conda run -n crawer python scripts/build_periodic_report.py --period weekly
+conda run -n crawer python scripts/build_periodic_report.py --period monthly
+```
+
 ## Scaffold-only ideas
 
-- Weekly review: reasonable future cadence is Sunday 20:00 local time, but generation is not implemented in this repo yet
-- Monthly review: reasonable future cadence is the first day of month at 09:30 local time, but generation is not implemented in this repo yet
 - Deep dive requests: still a host-level workflow idea, not a repo-backed automation path

@@ -335,8 +335,8 @@ def find_daily_briefs(
         return []
 
     results: list[tuple[date, Path]] = []
-    for f in daily_dir.glob("*_Daily.md"):
-        # Extract date from filename: YYYY_MM_DD_Daily.md
+    for f in daily_dir.glob("**/*_Daily.md"):
+        # Extract date from filename: YYYY_MM_DD_Daily.md (supports month subdirs)
         m = re.match(r"(\d{4})_(\d{2})_(\d{2})_Daily\.md$", f.name)
         if not m:
             continue

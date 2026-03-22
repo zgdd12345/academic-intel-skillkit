@@ -41,15 +41,24 @@ cp configs/sources.example.yaml configs/sources.local.yaml
 python3 scripts/run_daily_pipeline.py
 ```
 
-这条命令会串联执行：arXiv 抓取 → 多源热点采集 → LLM 摘要翻译 → 日报生成 → Obsidian 写入。任何可选步骤失败时会自动降级，不会阻断整体链路。
+这条命令会串联执行：arXiv 抓取 → 多源热点采集 → LLM 摘要翻译 → 日报生成 → Obsidian 写入。此外，周日自动触发周报生成，月末自动触发月报生成。任何可选步骤失败时会自动降级，不会阻断整体链路。
 
-当 `config/research-topics.local.yaml` 配置了有效的 `obsidian.vault_path` 时，日报会写入：
+当 `config/research-topics.local.yaml` 配置了有效的 `obsidian.vault_path` 时，输出结构为：
 
 ```text
-<vault_path>/<root_dir>/01_Daily/YYYY_MM_DD_Daily.md
+<vault_path>/<root_dir>/
+  01_Daily/<YYYY-MM>/YYYY_MM_DD_Daily.md           # 日报（按月分目录）
+  03_Weekly/YYYY-MM-WNN-academic-weekly.md          # 周报（周日自动生成）
+  04_Monthly/YYYY-MM-academic-monthly.md            # 月报（月末自动生成）
 ```
 
-### 周报和月报
+跳过周报/月报的自动触发：
+
+```bash
+python3 scripts/run_daily_pipeline.py --skip-periodic
+```
+
+### 单独运行周报/月报
 
 ```bash
 # 周报（过去 7 天）
@@ -64,8 +73,6 @@ python3 scripts/build_periodic_report.py --period weekly --dry-run
 # 不调用 LLM（纯数据报告）
 python3 scripts/build_periodic_report.py --period weekly --skip-llm
 ```
-
-周报写入 `03_Weekly/YYYY-Www-academic-weekly.md`，月报写入 `04_Monthly/YYYY-MM-academic-monthly.md`。
 
 ### 分步执行
 
@@ -104,7 +111,7 @@ skills/                  # Markdown 技能契约（供 AI agent 读取）
   └── paper-deep-dive/         # 脚手架
 
 scripts/                 # 确定性 Python CLI
-  ├── run_daily_pipeline.py    # 日报全链路编排
+  ├── run_daily_pipeline.py    # 日报全链路编排（含周报/月报自动触发）
   ├── build_periodic_report.py # 周报/月报生成
   ├── fetch_arxiv.py           # arXiv 抓取
   ├── fetch_huggingface.py     # HuggingFace 热点
