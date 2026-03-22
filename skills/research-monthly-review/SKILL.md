@@ -9,13 +9,14 @@ Production skill backed by `scripts/build_periodic_report.py`.
 
 ## Current scope
 
-- Parse daily brief Markdown files from Obsidian vault (`01_Daily/`)
+- Parse daily brief Markdown files from Obsidian vault (`01_Daily/<YYYY-MM>/`)
 - Full-month paper deduplication and re-ranking (top 30)
 - Topic trend analysis across the month
 - Community hotspot aggregation across platforms
 - LLM-generated Chinese overview and next-month recommendations
 - Threshold checking (configurable minimum daily briefs)
 - Output to `04_Monthly/YYYY-MM-academic-monthly.md` in Obsidian vault
+- Automatically triggered by `run_daily_pipeline.py` on the last day of each month (can also run standalone)
 
 ## Workflow
 

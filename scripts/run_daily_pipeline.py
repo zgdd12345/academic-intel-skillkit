@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 import subprocess
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +206,37 @@ def _run_parallel(args: argparse.Namespace, brief_out: str, topic_args: list[str
     return hotspot_available
 
 
+def _is_last_day_of_month(d: date) -> bool:
+    return d.day == calendar.monthrange(d.year, d.month)[1]
+
+
+def _run_periodic_reports(config_path: str, target: date) -> None:
+    """日报完成后，按日期自动触发周报/月报。"""
+    periodic_script = str(_SCRIPTS_DIR / "build_periodic_report.py")
+
+    # 周日 → 生成本周周报
+    if target.weekday() == 6:
+        print("\n--- 今天是周日，自动生成本周周报 ---")
+        run_optional_step(
+            [sys.executable, periodic_script,
+             "--config", config_path,
+             "--period", "weekly",
+             "--date", str(target)],
+            "周报生成",
+        )
+
+    # 月末 → 生成本月月报
+    if _is_last_day_of_month(target):
+        print("\n--- 今天是月末，自动生成本月月报 ---")
+        run_optional_step(
+            [sys.executable, periodic_script,
+             "--config", config_path,
+             "--period", "monthly",
+             "--date", str(target)],
+            "月报生成",
+        )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="串联 arXiv 抓取、可选热点抓取与日报生成，供 OpenClaw/cron 直接按单命令调度。"
@@ -218,6 +250,8 @@ def main() -> None:
     ap.add_argument("--skip-hotspots", "--skip-huggingface", action="store_true",
                     dest="skip_hotspots")
     ap.add_argument("--skip-enrich", action="store_true")
+    ap.add_argument("--skip-periodic", action="store_true",
+                    help="跳过周报/月报的自动触发")
     ap.add_argument("--hotspot-limit", type=int, default=20)
     ap.add_argument("--no-parallel", action="store_true",
                     help="禁用并行执行，回退到串行模式（用于调试）")
@@ -240,6 +274,11 @@ def main() -> None:
         f"hotspots={'已合并' if hotspot_available else '跳过'} | "
         f"brief={display_path(brief_out)}"
     )
+
+    # 日报完成后，按日期自动触发周报/月报
+    if not args.skip_periodic:
+        target = date.fromisoformat(args.date)
+        _run_periodic_reports(args.config, target)
 
 
 if __name__ == "__main__":

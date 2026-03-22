@@ -37,9 +37,12 @@ python3 scripts/manage_topics.py --list
 python3 scripts/manage_topics.py --query-plan
 
 # Full daily pipeline — parallel fetch + enrich (default)
+# Automatically triggers weekly report on Sundays and monthly report on last day of month
 python3 scripts/run_daily_pipeline.py
 # Serial mode (for debugging)
 python3 scripts/run_daily_pipeline.py --no-parallel
+# Skip automatic weekly/monthly report generation
+python3 scripts/run_daily_pipeline.py --skip-periodic
 
 # Multi-source pipeline — adds Reddit, HN, GitHub, S2, OpenAlex
 python3 scripts/run_multi_source.py \
@@ -90,7 +93,7 @@ conda run -n crawer python -m pytest tests/test_mvp_cli.py
    - `fetch_arxiv.py` — arXiv Atom feed via feedparser → `output/arxiv.json`
    - `fetch_huggingface.py` — HF `daily_papers` API → `output/huggingface.json`
    - `generate_daily_brief.py` — Merges/deduplicates/scores candidates → Markdown report
-   - `run_daily_pipeline.py` — Orchestrates arXiv + HF chain; suitable for cron/OpenClaw
+   - `run_daily_pipeline.py` — Orchestrates arXiv + HF chain + auto-triggers weekly (Sunday) / monthly (last day) reports; suitable for cron/OpenClaw
    - `run_multi_source.py` — Multi-source pipeline (Reddit, HN, GitHub, S2, OpenAlex); output feeds into `generate_daily_brief.py`
    - `enrich_summaries.py` — LLM-translates top-N English abstracts → `summary_zh` via OpenAI-compatible API
    - `manage_topics.py` — Read-only topic inspection (no mutation)
@@ -112,10 +115,12 @@ conda run -n crawer python -m pytest tests/test_mvp_cli.py
 
 **Data flow:**
 ```
-run_daily_pipeline.py (arXiv + HF only)
-  ├─ fetch_arxiv.py         → output/arxiv.json
-  ├─ fetch_huggingface.py   → output/huggingface.json
-  └─ generate_daily_brief.py → output/daily-brief.md (or Obsidian vault)
+run_daily_pipeline.py (single cron entry covers daily + weekly + monthly)
+  ├─ fetch_arxiv.py             → output/arxiv.json
+  ├─ fetch_huggingface.py       → output/huggingface.json
+  ├─ generate_daily_brief.py    → Obsidian 01_Daily/YYYY-MM/YYYY_MM_DD_Daily.md
+  ├─ (Sunday) build_periodic_report.py --period weekly
+  └─ (last day of month) build_periodic_report.py --period monthly
 
 run_multi_source.py (social + academic sources)
   └─ CollectPipeline
@@ -125,7 +130,13 @@ run_multi_source.py (social + academic sources)
 
 **arXiv query building:** Combines `include_keywords`, `exclude_keywords`, and `arxiv_categories` per topic (up to 6 keywords each). Example: `(all:agent OR all:planning) AND cat:cs.AI ANDNOT (all:game)`.
 
-**Output:** Chinese-language Markdown reports. When `obsidian.vault_path` is configured, writes to `<vault>/<root_dir>/01_Daily/YYYY-MM-DD-研究情报日报.md`.
+**Output:** Chinese-language Markdown reports. When `obsidian.vault_path` is configured, writes to Obsidian vault with the following structure:
+```
+<vault>/<root_dir>/
+  01_Daily/<YYYY-MM>/YYYY_MM_DD_Daily.md        # daily briefs grouped by month
+  03_Weekly/YYYY-MM-WNN-academic-weekly.md       # weekly reports (e.g. 2026-03-W13)
+  04_Monthly/YYYY-MM-academic-monthly.md         # monthly reports
+```
 
 ## Implementation Status
 

@@ -304,8 +304,10 @@ def obsidian_daily_brief_path(config: dict[str, Any], target_date: str) -> Path 
     root = obsidian_root(config)
     if root is None:
         return None
-    note_date = str(target_date).strip().replace("-", "_")
-    return root / "01_Daily" / f"{note_date}_Daily.md"
+    date_str = str(target_date).strip()
+    month_dir = date_str[:7]  # "2026-03"
+    note_date = date_str.replace("-", "_")
+    return root / "01_Daily" / month_dir / f"{note_date}_Daily.md"
 
 
 def obsidian_weekly_path(config: dict[str, Any], week_id: str) -> Path | None:

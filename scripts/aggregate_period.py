@@ -16,7 +16,7 @@ from parse_daily_briefs import DailyBriefData, ParsedHotspot, ParsedPaper
 @dataclass
 class PeriodAggregate:
     period_type: str  # "weekly" or "monthly"
-    period_id: str  # "2026-W12" or "2026-03"
+    period_id: str  # "2026-03-W12" or "2026-03"
     start_date: str
     end_date: str
     daily_briefs_found: int = 0
@@ -36,7 +36,7 @@ class PeriodAggregate:
 def compute_period_id(target: date, period_type: str) -> str:
     if period_type == "weekly":
         iso = target.isocalendar()
-        return f"{iso[0]}-W{iso[1]:02d}"
+        return f"{target.strftime('%Y-%m')}-W{iso[1]:02d}"
     return target.strftime("%Y-%m")
 
 
