@@ -476,7 +476,7 @@ def format_hotspot_analysis(
         response = client.chat.completions.create(
             model=str(model),
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
+            max_tokens=4096,
             temperature=0.5,
         )
         return response.choices[0].message.content.strip()

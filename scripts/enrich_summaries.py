@@ -121,7 +121,7 @@ def _call_llm(client: Any, model: str, summary: str) -> str:
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": TRANSLATE_PROMPT.format(summary=summary)}],
-        max_tokens=800,
+        max_tokens=4096,
         temperature=0.3,
     )
     return response.choices[0].message.content.strip()
@@ -198,7 +198,7 @@ def _enrich_titles(
             response = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": TITLE_PROMPT.format(title=title)}],
-                max_tokens=80,
+                max_tokens=2048,
                 temperature=0.3,
             )
             item["title_zh"] = response.choices[0].message.content.strip()

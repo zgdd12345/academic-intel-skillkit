@@ -75,7 +75,7 @@ def _call_llm(client: Any, model: str, prompt: str) -> str:
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=1200,
+        max_tokens=4096,
         temperature=0.4,
     )
     return response.choices[0].message.content.strip()
