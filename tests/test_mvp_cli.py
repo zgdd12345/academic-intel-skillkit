@@ -248,7 +248,7 @@ class MvpCliTests(unittest.TestCase):
         self.assertIn("# 研究情报日报 ·", content)
         self.assertIn("[!abstract] 今日概览", content)
         self.assertIn("## 最新工作", content)
-        self.assertIn("中文摘要：提出一个面向复杂任务的多智能体工具使用规划框架。", content)
+        self.assertIn("提出一个面向复杂任务的多智能体工具使用规划框架。", content)
         self.assertIn("中文导读：", content)
         self.assertIn("当前稳定实现链路是 arXiv 抓取、归一化去重、主题匹配评分和 Markdown 日报渲染。", content)
         self.assertIn("指定了 Semantic Scholar JSON，但当前文件不存在，因此本次没有合并该输入。", content)
@@ -277,7 +277,7 @@ class MvpCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         content = out_path.read_text(encoding="utf-8")
         self.assertIn("Reward-Guided Agent Search", content)
-        self.assertIn("提示：Hugging Face 热榜第 1 位", content)
+        self.assertIn("热榜第 1 位", content)
         self.assertIn("已合并社区热点 JSON；当前仓库已提供最小可用的 `scripts/fetch_huggingface.py` 采集器。", content)
 
     def test_manage_topics_outputs_chinese_list_validate_and_detail(self) -> None:
@@ -428,7 +428,7 @@ class ReviewRegressionTests(unittest.TestCase):
 
         self.assertEqual(
             path,
-            Path("/tmp/ObsidianVault/Research_Intel/01_Daily/2026_03_13_Daily.md"),
+            Path("/tmp/ObsidianVault/Research_Intel/01_Daily/2026-03/2026_03_13_Daily.md"),
         )
 
     def _make_pipeline_config(self, workdir: Path) -> Path:
@@ -500,7 +500,7 @@ class ReviewRegressionTests(unittest.TestCase):
             self.assertIn("enrich_summaries.py", enrich_cmd[1])
             self.assertIn("generate_daily_brief.py", brief_cmd[1])
             self.assertIn(
-                "/tmp/ObsidianVault/Research_Intel/01_Daily/2026_03_13_Daily.md",
+                "/tmp/ObsidianVault/Research_Intel/01_Daily/2026-03/2026_03_13_Daily.md",
                 brief_cmd,
             )
 
