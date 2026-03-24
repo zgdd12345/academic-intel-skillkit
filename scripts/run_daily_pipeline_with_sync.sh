@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OBSIDIAN_REPO_DEFAULT="/Volumes/My Shared Files/ObsidianLib/Document_News"
-CONDA_BIN_DEFAULT="/opt/miniconda3/condabin/conda"
+CONDA_BIN_DEFAULT="${HOME}/miniconda3/condabin/conda"
 CONDA_ENV_DEFAULT="crawer"
 AUTO_COMMIT_PREFIX_DEFAULT="chore(research): sync daily brief"
 
