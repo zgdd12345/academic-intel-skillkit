@@ -30,9 +30,6 @@ ensure_clean_pull_or_abort() {
   if ! git -C "$repo" diff --quiet || ! git -C "$repo" diff --cached --quiet; then
     fail "repo has uncommitted changes, aborting pull: $repo"
   fi
-  if [ -n "$(git -C "$repo" ls-files --others --exclude-standard)" ]; then
-    fail "repo has untracked files, aborting pull: $repo"
-  fi
   git -C "$repo" pull --rebase --autostash
 }
 

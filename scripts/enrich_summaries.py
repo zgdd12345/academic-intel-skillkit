@@ -47,6 +47,8 @@ TITLE_PROMPT = (
 
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TOP_N = 8
+DEFAULT_HF_SUMMARY_TOP_N = 8
+DEFAULT_HF_TITLE_TOP_N = 12
 
 
 def _load_config(config_path: str) -> dict[str, Any]:
@@ -178,9 +180,11 @@ def _enrich_titles(
     client: Any,
     model: str,
     dry_run: bool,
+    max_items: int | None = None,
 ) -> int:
     """Translate English titles → title_zh for hotspot items. Returns count enriched."""
     enriched = 0
+    attempted = 0
     for item in items:
         title = str(item.get("title") or item.get("name") or "").strip()
         title_zh = str(item.get("title_zh") or "").strip()
@@ -189,9 +193,13 @@ def _enrich_titles(
         if re.search(r"[\u3400-\u9fff]", title):
             continue  # already Chinese
 
+        if max_items is not None and attempted >= max_items:
+            break
+
         if dry_run:
             print(f"[dry-run] Would translate title: {title[:80]}")
             enriched += 1
+            attempted += 1
             continue
 
         try:
@@ -203,7 +211,9 @@ def _enrich_titles(
             )
             item["title_zh"] = response.choices[0].message.content.strip()
             enriched += 1
+            attempted += 1
         except Exception as exc:  # noqa: BLE001
+            attempted += 1
             print(f"警告：标题翻译失败 {title[:40]!r}：{exc}", file=sys.stderr)
 
     return enriched
@@ -320,13 +330,20 @@ def main() -> None:
                 for item in hf_items
             } - {""}
             if all_hf_ids:
-                print(f"LLM 翻译 HF 热点摘要：{len(all_hf_ids)} 篇")
-                hf_count = _enrich_items(hf_items, all_hf_ids, client, model, dry_run=args.dry_run)
+                shortlisted_hf_ids = set(list(all_hf_ids)[:DEFAULT_HF_SUMMARY_TOP_N])
+                print(f"LLM 翻译 HF 热点摘要：{len(shortlisted_hf_ids)} / {len(all_hf_ids)} 篇")
+                hf_count = _enrich_items(hf_items, shortlisted_hf_ids, client, model, dry_run=args.dry_run)
                 print(f"完成：翻译 HF 热点摘要 {hf_count} 篇")
 
             if not args.dry_run:
-                print(f"LLM 翻译 HF 热点标题：{len(hf_items)} 条")
-                title_count = _enrich_titles(hf_items, client, model, dry_run=False)
+                print(f"LLM 翻译 HF 热点标题：最多 {DEFAULT_HF_TITLE_TOP_N} 条")
+                title_count = _enrich_titles(
+                    hf_items,
+                    client,
+                    model,
+                    dry_run=False,
+                    max_items=DEFAULT_HF_TITLE_TOP_N,
+                )
                 dump_json(args.huggingface, hf_payload)
                 print(f"完成：翻译标题 {title_count} 条，已写入 {args.huggingface}")
 
