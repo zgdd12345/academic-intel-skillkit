@@ -165,8 +165,10 @@ examples/                # 部署说明与参考
 参见 `examples/openclaw-cron-notes.md`。推荐命令：
 
 ```bash
-conda run -n crawer python scripts/run_daily_pipeline.py
+bash scripts/run_daily_pipeline_with_sync.sh
 ```
+
+该包装脚本会在日报流水线前后自动处理 Obsidian 仓库同步：执行前先 `git pull --rebase --autostash`，执行后自动 `git add` / `git commit` / `git push`。
 
 ## 配置说明
 
